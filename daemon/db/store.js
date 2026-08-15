@@ -18,14 +18,21 @@ export function getDb() {
   return db;
 }
 
-// ─── Write methods ───────────────────────────────────────────────────────────
+// ─── Write methods ────────────────────────────────────────────────────────────
 
+/**
+ * Upsert a session row. Token totals are ACCUMULATED — each call adds the delta
+ * for that request, not the lifetime total. This allows the proxy to call
+ * upsertSession once per prompt without tracking cumulative state.
+ */
 export function upsertSession(session) {
   getDb().prepare(`
-    INSERT INTO sessions (id, tool, started_at, project_path, project_name, model,
-      total_input_tokens, total_output_tokens, total_cache_read, total_cache_write, equiv_cost_usd)
-    VALUES (@id, @tool, @started_at, @project_path, @project_name, @model,
-      @total_input_tokens, @total_output_tokens, @total_cache_read, @total_cache_write, @equiv_cost_usd)
+    INSERT INTO sessions
+      (id, tool, started_at, project_path, project_name, model,
+       total_input_tokens, total_output_tokens, total_cache_read, total_cache_write, equiv_cost_usd)
+    VALUES
+      (@id, @tool, @started_at, @project_path, @project_name, @model,
+       @total_input_tokens, @total_output_tokens, @total_cache_read, @total_cache_write, @equiv_cost_usd)
     ON CONFLICT(id) DO UPDATE SET
       ended_at            = COALESCE(excluded.ended_at, ended_at),
       model               = COALESCE(excluded.model, model),
@@ -85,10 +92,10 @@ export function getProjects() {
       project_path,
       project_name,
       tool,
-      COUNT(*)              AS session_count,
+      COUNT(*)                                     AS session_count,
       SUM(total_input_tokens + total_output_tokens) AS total_tokens,
-      SUM(equiv_cost_usd)   AS total_equiv_cost,
-      MAX(started_at)       AS last_active
+      SUM(equiv_cost_usd)                           AS total_equiv_cost,
+      MAX(started_at)                               AS last_active
     FROM sessions
     WHERE project_path IS NOT NULL
     GROUP BY project_path, tool
@@ -99,12 +106,11 @@ export function getProjects() {
 export function getSessions({ tool, project, limit = 50, offset = 0 } = {}) {
   let where = 'WHERE 1=1';
   const params = {};
-  if (tool)    { where += ' AND tool = @tool';               params.tool = tool; }
-  if (project) { where += ' AND project_path = @project';    params.project = project; }
+  if (tool)    { where += ' AND tool = @tool';            params.tool = tool; }
+  if (project) { where += ' AND project_path = @project'; params.project = project; }
   params.limit = limit; params.offset = offset;
   return getDb().prepare(`
-    SELECT * FROM sessions ${where}
-    ORDER BY started_at DESC LIMIT @limit OFFSET @offset
+    SELECT * FROM sessions ${where} ORDER BY started_at DESC LIMIT @limit OFFSET @offset
   `).all(params);
 }
 
@@ -113,9 +119,7 @@ export function getSession(id) {
 }
 
 export function getPrompts(sessionId) {
-  return getDb().prepare(`
-    SELECT * FROM prompts WHERE session_id = ? ORDER BY timestamp ASC
-  `).all(sessionId);
+  return getDb().prepare('SELECT * FROM prompts WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId);
 }
 
 export function getPrompt(id) {
@@ -123,15 +127,11 @@ export function getPrompt(id) {
 }
 
 export function getToolCalls(promptId) {
-  return getDb().prepare(`
-    SELECT * FROM tool_calls WHERE prompt_id = ? ORDER BY call_order ASC
-  `).all(promptId);
+  return getDb().prepare('SELECT * FROM tool_calls WHERE prompt_id = ? ORDER BY call_order ASC').all(promptId);
 }
 
 export function getOptimization(promptId) {
-  return getDb().prepare(`
-    SELECT * FROM optimizations WHERE prompt_id = ? ORDER BY created_at DESC LIMIT 1
-  `).get(promptId);
+  return getDb().prepare('SELECT * FROM optimizations WHERE prompt_id = ? ORDER BY created_at DESC LIMIT 1').get(promptId);
 }
 
 export function getOverviewStats(days = 30) {
