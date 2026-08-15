@@ -235,9 +235,10 @@ function syncOpenCode() {
       SELECT DISTINCT s.*
       FROM sessions s
       JOIN messages m ON m.session_id = s.id
-      WHERE m.created > ? OR m.created * 1000 > ?
+      WHERE m.created > ? OR m.created > ?
+      -- first param: sinceTs in ms (OpenCode stores ms), second: sinceTs in seconds (some versions store seconds)
       ORDER BY s.created ASC
-    `).all(sinceTs, sinceTs);
+    `).all(sinceTs, Math.floor(sinceTs / 1000));
 
     let totalPrompts = 0;
 
