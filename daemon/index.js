@@ -8,6 +8,7 @@ import { config } from './config.js';
 import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
 import { createClaudeProxy } from './proxy/claude-proxy.js';
+import { startOpenCodeWatcher } from './watchers/opencode-watcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +40,9 @@ server.listen(config.daemonPort, () => {
 
 // Start Claude Code intercepting proxy
 createClaudeProxy(config.claudeProxyPort);
+
+// Start OpenCode SQLite watcher
+startOpenCodeWatcher();
 
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
 process.on('SIGINT',  () => { server.close(); process.exit(0); });
