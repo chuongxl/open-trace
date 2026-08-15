@@ -142,8 +142,7 @@ function capJson(obj, maxBytes) {
  */
 function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
   try {
-    const sessionId = deriveSessionId(reqBody);
-    const { projectPath, projectName } = getProjectInfo(reqBody);
+    const { sessionId, projectPath, projectName } = resolveSession(reqBody);
     const cost = estimateCost(model, usage);
 
     upsertSession({
@@ -188,6 +187,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
         timestamp:  Date.now(),
       });
     });
+    console.log('[claude-proxy] stored: model='+model+' in='+(usage.input_tokens||0)+' out='+(usage.output_tokens||0)+' tools='+toolUses.length+' sid='+sessionId.slice(0,8));
   } catch (err) {
     console.error('[claude-proxy] DB write error:', err.message);
   }
@@ -305,6 +305,10 @@ function parseStreamAndStore(reqBody, sseText) {
         if (ev.delta?.type === 'input_json_delta' && currentToolId && toolMap.has(currentToolId)) {
           toolMap.get(currentToolId).inputChunks.push(ev.delta.partial_json || '');
         }
+        break;
+      }
+      case 'content_block_stop': {
+        curId=null; // reset: subsequent non-tool deltas must not be misattributed
         break;
       }
       case 'message_delta': {
