@@ -86,6 +86,17 @@ function extractUserText(userParts) {
     .slice(0, 2000) || null;
 }
 
+
+/**
+ * Normalize an OpenCode timestamp to milliseconds.
+ * OpenCode may store created as Unix seconds (10 digits) or milliseconds (13 digits).
+ */
+function toMs(ts) {
+  if (!ts) return Date.now();
+  // If timestamp < year 2001 in ms (< 1e12), it's in seconds — convert to ms
+  return ts < 1_000_000_000_000 ? ts * 1000 : ts;
+}
+
 // ── Session + message processing ──────────────────────────────────────────────
 
 /**
@@ -119,20 +130,20 @@ function processSession(ocSession, messages, ocDb, sinceTs) {
     if (msg.role !== 'assistant') continue;
 
     // Only process messages newer than our last sync point
-    if (msg.created <= sinceTs) {
+    if (toMs(msg.created) <= sinceTs) {
       pendingUserParts = [];
       continue;
     }
 
     const usage   = extractTokens(parts);
     const cost    = estimateCost('unknown', usage); // OpenCode may use various models
-    const msgTs   = msg.created; // OpenCode stores epoch ms
+    const msgTs   = toMs(msg.created); // OpenCode stores epoch ms
 
     // Upsert session (accumulates token totals per call)
     upsertSession({
       id:                  sessionId,
       tool:                'opencode',
-      started_at:          ocSession.created || msgTs,
+      started_at:          toMs(ocSession.created) || msgTs,
       project_path:        null, // OpenCode doesn't expose CWD in DB
       project_name:        projectName,
       model:               null,
@@ -173,10 +184,14 @@ function processSession(ocSession, messages, ocDb, sinceTs) {
       let inputJson  = null;
       let outputJson = null;
 
-      try { inputJson  = part.input  ? JSON.stringify(JSON.parse(part.input))  : null; } catch { inputJson  = part.input;  }
+      // Cap raw strings before JSON parsing to avoid processing huge payloads
+      const rawIn  = part.input  ? String(part.input).slice(0, 4000)  : null;
+      const rawOut = result?.output ? String(result.output).slice(0, 4000) : null;
+      try { inputJson  = rawIn  ? JSON.stringify(JSON.parse(rawIn))  : null; } catch { inputJson  = rawIn;  }
       const result = part.tool_call_id ? toolResultMap.get(part.tool_call_id) : null;
       if (result) {
-        try { outputJson = result.output ? JSON.stringify(JSON.parse(result.output)) : null; } catch { outputJson = result.output; }
+        const rawOut2 = result.output ? String(result.output).slice(0, 4000) : null;
+        try { outputJson = rawOut2 ? JSON.stringify(JSON.parse(rawOut2)) : null; } catch { outputJson = rawOut2; }
       }
 
       insertToolCall({
@@ -220,9 +235,9 @@ function syncOpenCode() {
       SELECT DISTINCT s.*
       FROM sessions s
       JOIN messages m ON m.session_id = s.id
-      WHERE m.created > ?
+      WHERE m.created > ? OR m.created * 1000 > ?
       ORDER BY s.created ASC
-    `).all(sinceTs);
+    `).all(sinceTs, sinceTs);
 
     let totalPrompts = 0;
 
@@ -267,7 +282,7 @@ export function startOpenCodeWatcher() {
   // Watch both the DB and WAL file; WAL is written on every OpenCode commit
   const watcher = chokidar.watch([dbPath, walPath], {
     persistent:   true,
-    ignoreInitial: false,  // run initial sync on startup
+    ignoreInitial: false,  // false = emit "add" for existing files → triggers initial sync on startup
     usePolling:   false,
   });
 
