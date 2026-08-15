@@ -42,9 +42,10 @@ server.listen(config.daemonPort, () => {
 createClaudeProxy(config.claudeProxyPort);
 
 // Start OpenCode SQLite watcher
-startOpenCodeWatcher();
+const ocWatcher = startOpenCodeWatcher();
 
-process.on('SIGTERM', () => { server.close(); process.exit(0); });
-process.on('SIGINT',  () => { server.close(); process.exit(0); });
+const shutdown = () => { server.close(); ocWatcher?.close(); process.exit(0); };
+process.on('SIGTERM', shutdown);
+process.on('SIGINT',  shutdown);
 
 export default app;
