@@ -7,6 +7,7 @@ import { existsSync } from 'fs';
 import { config } from './config.js';
 import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
+import { createClaudeProxy } from './proxy/claude-proxy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -28,13 +29,16 @@ if (existsSync(dashDist)) {
   app.get('*', (_req, res) => res.sendFile(join(dashDist, 'index.html')));
 }
 
+// Start Express dashboard/API server
 const server = createServer(app);
 server.listen(config.daemonPort, () => {
   const addr = 'http://' + 'localhost:' + config.daemonPort;
-  console.log('[open-trace] running at ' + addr);
-  console.log('[open-trace] claude proxy port ' + config.claudeProxyPort);
-  console.log('[open-trace] db ' + config.dbPath);
+  console.log('[open-trace] Dashboard at ' + addr);
+  console.log('[open-trace] DB: ' + config.dbPath);
 });
+
+// Start Claude Code intercepting proxy
+createClaudeProxy(config.claudeProxyPort);
 
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
 process.on('SIGINT',  () => { server.close(); process.exit(0); });
