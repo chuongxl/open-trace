@@ -19,7 +19,7 @@ function createFixture(dir) {
     "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT); " +
     "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);"
   );
-  db.prepare("INSERT INTO session VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+  db.prepare("INSERT INTO session VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
     "sess-1", "proj-1", "ws-1", null, "slug-1", "/tmp/demo-proj", null, "Demo Fix Session", 1, null, null, 0.012, 1200, 340, 60, 90, 20, null, null, "cli", "claude-haiku-4-5", BASE + 1000, BASE + 9000, null, null);
   const insMsg = db.prepare("INSERT INTO message VALUES (?,?,?,?,?)");
   const insPart = db.prepare("INSERT INTO part VALUES (?,?,?,?,?,?)");
