@@ -20,6 +20,8 @@ cat /tmp/ot-daemon9.log | tail -6 >> $LOG
 pkill -f "node daemon/index.js" 2>/dev/null
 B64=$(base64 < $LOG | tr -d "
 ")
-curl -s -X PUT -H "Authorization: token $GHTOK" -H "Content-Type: application/json" -d '{"message":"tmp: p6 integration results","content":"'$B64'","branch":"feat/phase-3-opencode-watcher"}' https://api.github.com/repos/chuongxl/open-trace/contents/tmp/p7-results.txt >> $LOG 2>&1
+EXISTSHA=$(curl -s -H "Authorization: token $GHTOK" "https://api.github.com/repos/chuongxl/open-trace/contents/tmp/p7-results.txt?ref=feat/phase-3-opencode-watcher" | grep -o '"sha":"[0-9a-f]*"' | head -1 | cut -d'"' -f4)
+SHEXTRA=""; [ -n "$EXISTSHA" ] && SHEXTRA='"sha":"'$EXISTSHA'",'
+curl -s -X PUT -H "Authorization: token $GHTOK" -H "Content-Type: application/json" -d '{"message":"tmp: p7 integration results","content":"'$B64'","branch":"feat/phase-3-opencode-watcher",'$SHEXTRA'}' https://api.github.com/repos/chuongxl/open-trace/contents/tmp/p7-results.txt >> $LOG 2>&1
 echo "" >> $LOG
 echo "RUNNER9_DONE" >> $LOG
