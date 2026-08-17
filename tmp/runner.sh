@@ -1,7 +1,6 @@
 #!/bin/bash
 set -x
 export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new'
-export GHTOK=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
 cd /Users/chuongnd/github
 rm -rf ot-p3
 git clone --branch feat/phase-3-opencode-watcher git@github.com:chuongxl/open-trace.git ot-p3 2>&1 | tail -2
