@@ -113,8 +113,7 @@ function extractText(parts) {
     if (d && d.type === 'text' && typeof d.text === 'string') chunks.push(d.text);
     if (d && d.type === 'reasoning' && typeof d.text === 'string') chunks.push(d.text);
   }
-  return chunks.join('
-') || null;
+  return chunks.join('\n') || null;
 }
 
 /**
