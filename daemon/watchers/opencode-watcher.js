@@ -141,7 +141,7 @@ function processSession(ocSession, messages, ocDb) {
 
   const cost = ocSession.cost != null
     ? Number(ocSession.cost)
-    : estimateCost(model, { tokens_in: inTok, tokens_out: outTok + reaTok });
+    : estimateCost(model, { input_tokens: inTok, output_tokens: outTok + reaTok });
 
   upsertSession({
     id:                  sessionId,
