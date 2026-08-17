@@ -1,10 +1,13 @@
 #!/bin/bash
-set -x
-export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new'
-cd /Users/chuongnd/github
+export LOG=/tmp/ot-run.log
+echo "RUNNER START $(date)" > $LOG
+echo "=== 1. CLONE ===" >> $LOG
+cd /Users/chuongnd/github 2>>$LOG || exit 1
 rm -rf ot-p3
-git clone --branch feat/phase-3-opencode-watcher git@github.com:chuongxl/open-trace.git ot-p3 2>&1 | tail -2
-cd ot-p3
+git clone --branch feat/phase-3-opencode-watcher https://chuongxl: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@github.com/chuongxl/open-trace.git ot-p3 2>>$LOG
+echo "clone_exit=$?" >> $LOG
+cd ot-p3 2>>$LOG || exit 1
+echo '=== 2. OPENDCODE SCHEMA DUMP ===' >> $LOG
 python3 << 'PYEOF' > /tmp/oc-dump.txt 2>&1
 import sqlite3, json
 out = []
@@ -24,33 +27,26 @@ except Exception as e:
     add('OC-ERR: ' + repr(e))
 print(chr(10).join(out))
 PYEOF
-cat /tmp/oc-dump.txt
-npm install 2>&1 | tail -2
+cat /tmp/oc-dump.txt >> $LOG
+echo '=== 3. NPM INSTALL ===' >> $LOG
+npm install --no-audit --no-fund 2>&1 | tail -3 >> $LOG
+echo '=== 4. DAEMON ===' >> $LOG
 pkill -f 'node daemon/index.js' 2>/dev/null
 nohup node daemon/index.js > /tmp/ot-daemon.log 2>&1 &
-sleep 5
-echo '--- DAEMON LOG ---'
-cat /tmp/ot-daemon.log
-echo '--- HEALTH ---'
-curl -s http://127.0.0.1:9900/api/health
-echo ''
-echo '--- OT DB TABLES ---'
-sqlite3 ~/.open-trace/data.db '.tables'
-echo '--- OT COUNTS ---'
-sqlite3 ~/.open-trace/data.db "SELECT (SELECT COUNT(*) FROM sessions) || ' sessions, ' || (SELECT COUNT(*) FROM prompts) || ' prompts'"
-mkdir -p /tmp/ot-results
-cp /tmp/oc-dump.txt /tmp/ot-results/schema.txt
-cp /tmp/ot-daemon.log /tmp/ot-results/daemon.log
-curl -s http://127.0.0.1:9900/api/health > /tmp/ot-results/health.txt
-sqlite3 ~/.open-trace/data.db '.tables' > /tmp/ot-results/tables.txt
-sqlite3 ~/.open-trace/data.db 'SELECT id, tool, project_name, total_input_tokens, total_output_tokens, equiv_cost_usd FROM sessions' > /tmp/ot-results/sessions.txt
-sqlite3 ~/.open-trace/data.db 'SELECT id, session_id, model, input_tokens, output_tokens, substr(input_text,1,80) FROM prompts' > /tmp/ot-results/prompts.txt
-sqlite3 ~/.open-trace/data.db 'SELECT id, prompt_id, call_type, name, substr(input,1,80) FROM tool_calls' > /tmp/ot-results/toolcalls.txt
-cd /Users/chuongnd/github/ot-p3
-cp /tmp/ot-results/*.txt tmp/ 2>/dev/null
-git config user.email 'chuongxl@users.noreply.github.com'
-git config user.name 'chuongxl'
-git add tmp/ 2>&1
-git commit -m "tmp: test results" 2>&1 | tail -1
-git push origin feat/phase-3-opencode-watcher 2>&1 | tail -1
-echo 'RUNNER_DONE'
+sleep 6
+cat /tmp/ot-daemon.log >> $LOG
+echo '=== 5. HEALTH ===' >> $LOG
+curl -s http://127.0.0.1:9900/api/health >> $LOG
+echo '' >> $LOG
+echo '=== 6. OT DB ===' >> $LOG
+sqlite3 ~/.open-trace/data.db '.tables' >> $LOG 2>&1
+sqlite3 ~/.open-trace/data.db "SELECT (SELECT COUNT(*) FROM sessions) || ' sessions, ' || (SELECT COUNT(*) FROM prompts) || ' prompts, ' || (SELECT COUNT(*) FROM tool_calls) || ' tool_calls'" >> $LOG 2>&1
+sqlite3 ~/.open-trace/data.db 'SELECT id, tool, project_name, total_input_tokens, total_output_tokens, equiv_cost_usd FROM sessions LIMIT 5' >> $LOG 2>&1
+sqlite3 ~/.open-trace/data.db 'SELECT id, session_id, model, input_tokens, output_tokens, substr(input_text,1,60) FROM prompts LIMIT 5' >> $LOG 2>&1
+sqlite3 ~/.open-trace/data.db 'SELECT id, prompt_id, call_type, name, substr(input,1,60) FROM tool_calls LIMIT 5' >> $LOG 2>&1
+echo '=== 7. PUSH RESULTS ===' >> $LOG
+B64=$(base64 < $LOG | tr -d "
+")
+curl -s -X PUT -H "Authorization: token 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" -H "Content-Type: application/json" -d '{"message":"tmp: runner results","content":"'$B64'","branch":"feat/phase-3-opencode-watcher"}' https://api.github.com/repos/chuongxl/open-trace/contents/tmp/runner-results.txt >> $LOG 2>&1
+echo '' >> $LOG
+echo 'RUNNER_DONE' >> $LOG
