@@ -145,6 +145,7 @@ function processSession(ocSession, messages, ocDb) {
   upsertSession({
     id:                  sessionId,
     tool:                'opencode',
+    __replaceTotals:     true,
     started_at:          sTs,
     project_path:        ocSession.directory || null,
     project_name:        projectName,
