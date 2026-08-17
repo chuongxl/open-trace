@@ -1,24 +1,40 @@
 /**
- * daemon/watchers/opencode-watcher.js
+ * OpenCode SQLite Watcher.
  *
  * Watches OpenCode's local SQLite DB and syncs new sessions, prompts, and tool
- * calls into the open-trace DB in near-real-time. No proxy or MITM needed —
- * OpenCode writes everything to its SQLite DB; we read it as a readonly consumer.
+ * calls into open-trace. OpenCode (current versions) uses a single SQLite DB at
+ *   ~/.local/share/opencode/opencode.db
+ * with a project-style schema:
+ *   session  (id, project_id, workspace_id, parent_id, slug, directory, title,
+ *             metadata, cost, tokens_input, tokens_output, tokens_reasoning,
+ *             tokens_cache_read, tokens_cache_write, agent, model,
+ *             time_created, time_updated, ...)
+ *   message  (id, session_id, time_created, time_updated, data JSON)
+ *   part     (id, message_id, session_id, time_created, time_updated, data JSON)
  *
- * Sync strategy:
- *   - On startup: query MAX(timestamp) from our own prompts for opencode sessions
- *     to find the last-synced point. Only pull newer messages.
- *   - On each file-change event: reopen OpenCode DB readonly, sync new rows.
- *   - INSERT OR IGNORE on prompts/tool_calls prevents duplicates on edge cases.
- *   - Sessions use ACCUMULATE upsert, so calling upsertSession repeatedly is safe.
+ * - message.data is a JSON blob like { role: 'user'|'assistant'|'tool', ... }
+ * - part.data is a tagged JSON blob: { type: 'text', text }
+ *                                    { type: 'tool-call', id, name, input }
+ *                                    { type: 'tool-result', id, name, result }
+ *                                    { type: 'reasoning', text }
+ * - Token/cost totals live on the session row (no per-message usage).
  *
- * Issue: #6
+ * Sync cursor strategy:
+ *   - On startup: query MAX(timestamp) from our own prompts table for
+ *     tool='opencode' sessions — no extra state file, self-contained.
+ *   - Changed/new sessions are discovered via a join on message.time_created,
+ *     so old sessions that receive new messages are re-scanned.
+ *   - INSERT OR IGNORE on prompts/tool_calls prevents duplicates.
+ *   - Sessions use ACCUMULATE upsert (safe to call repeatedly).
+ *
+ * The OpenCode DB is opened read-only — open-trace can never modify it.
  */
 
 import chokidar from 'chokidar';
 import Database from 'better-sqlite3';
 import { existsSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { basename } from 'path';
 import { config } from '../config.js';
 import { upsertSession, insertPrompt, insertToolCall, getDb } from '../db/store.js';
 import { estimateCost } from '../pricing/models.js';
@@ -26,240 +42,273 @@ import { estimateCost } from '../pricing/models.js';
 // Minimum ms between sync runs (debounce rapid WAL writes)
 const DEBOUNCE_MS = 500;
 
-let syncTimer   = null;
-let isSyncing   = false;
+// Cap for any single input/output payload captured (chars, before JSON parse)
+const PAYLOAD_CAP = 4000;
 
-// ── Cursor ────────────────────────────────────────────────────────────────────
+let syncTimer = null;
+let isSyncing = false;
 
 /**
- * Return the timestamp of the most recently synced OpenCode message.
+ * Last synced timestamp: MAX(timestamp) from our own prompts for opencode.
  * We store opencode prompts with session.tool='opencode'.
- * Returns 0 if nothing has been synced yet (full initial sync).
+ * @returns {number} epoch ms cursor; 0 if never synced
  */
 function getLastSyncedAt() {
-  try {
-    const row = getDb().prepare(`
+  const row = getDb()
+    .prepare(`
       SELECT MAX(p.timestamp) AS last_ts
       FROM prompts p
       JOIN sessions s ON s.id = p.session_id
       WHERE s.tool = 'opencode'
-    `).get();
-    return row?.last_ts ?? 0;
-  } catch {
-    return 0;
-  }
+    `)
+    .get();
+  return row && row.last_ts ? Number(row.last_ts) : 0;
 }
 
-// ── Token extraction ──────────────────────────────────────────────────────────
-
-/**
- * Sum token counts across all parts that carry a tokens JSON object.
- * OpenCode parts.tokens = { input, output, cache_read, cache_write }
- * @param {Array} parts - array of opencode part rows
- * @returns {{ input_tokens, output_tokens, cache_read_tokens, cache_write_tokens }}
- */
-function extractTokens(parts) {
-  let inp = 0, out = 0, cR = 0, cW = 0;
-  for (const part of parts) {
-    if (!part.tokens) continue;
-    let tok;
-    try { tok = typeof part.tokens === 'string' ? JSON.parse(part.tokens) : part.tokens; }
-    catch { continue; }
-    inp += tok.input        || 0;
-    out += tok.output       || 0;
-    cR  += tok.cache_read   || 0;
-    cW  += tok.cache_write  || 0;
-  }
-  return { input_tokens: inp, output_tokens: out, cache_read_tokens: cR, cache_write_tokens: cW };
-}
-
-/**
- * Extract text from 'text'-type parts of the preceding user message.
- * @param {Array} userParts - parts belonging to the user message before this assistant turn
- */
-function extractUserText(userParts) {
-  if (!Array.isArray(userParts)) return null;
-  return userParts
-    .filter(p => p.type === 'text' && p.text)
-    .map(p => p.text)
-    .join(' ')
-    .slice(0, 2000) || null;
-}
-
-
-/**
- * Normalize an OpenCode timestamp to milliseconds.
- * OpenCode may store created as Unix seconds (10 digits) or milliseconds (13 digits).
- */
+/** Normalize a possibly-seconds epoch to ms (defensive: detect ms vs s). */
 function toMs(ts) {
   if (!ts) return Date.now();
-  // If timestamp < year 2001 in ms (< 1e12), it's in seconds — convert to ms
-  return ts < 1_000_000_000_000 ? ts * 1000 : ts;
+  const n = Number(ts);
+  return n > 1e12 ? n : n * 1000;
 }
 
-// ── Session + message processing ──────────────────────────────────────────────
+/** Safe JSON.parse of a capped string; returns string on failure. */
+function parseCapped(raw, cap) {
+  if (!raw) return null;
+  const s = typeof raw === 'string' ? raw : JSON.stringify(raw);
+  if (!s) return null;
+  const capped = s.slice(0, cap || PAYLOAD_CAP);
+  try {
+    return JSON.stringify(JSON.parse(capped));
+  } catch {
+    return capped;
+  }
+}
+
+/** Read message.data safely; returns object or null. */
+function readMessageData(msg) {
+  try {
+    const d = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
+    return d && typeof d === 'object' ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read part.data safely; returns object or null. */
+function readPartData(part) {
+  try {
+    const d = typeof part.data === 'string' ? JSON.parse(part.data) : part.data;
+    return d && typeof d === 'object' ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Extract text content from an array of part rows (for user input_text). */
+function extractText(parts) {
+  const chunks = [];
+  for (const part of parts) {
+    const d = readPartData(part);
+    if (d && d.type === 'text' && typeof d.text === 'string') chunks.push(d.text);
+    if (d && d.type === 'reasoning' && typeof d.text === 'string') chunks.push(d.text);
+  }
+  return chunks.join('
+') || null;
+}
 
 /**
- * Process one OpenCode session: upsert session row and insert all new prompts.
- * @param {object}   ocSession  - row from opencode sessions table
- * @param {Array}    messages   - rows from opencode messages for this session
+ * Process one OpenCode session: upsert session row, insert prompts + tool calls.
+ *
+ * @param {object}   ocSession  - row from opencode session table
+ * @param {Array}    messages   - opencode message rows (with parts preloaded)
  * @param {Database} ocDb       - readonly opencode DB handle
- * @param {number}   sinceTs    - only process messages with created > sinceTs
  */
-function processSession(ocSession, messages, ocDb, sinceTs) {
+function processSession(ocSession, messages, ocDb) {
   const sessionId   = 'oc-' + ocSession.id;
-  const projectName = ocSession.title || 'opencode-session';
+  const projectName = ocSession.title
+    || (ocSession.directory ? basename(String(ocSession.directory)) : null)
+    || 'opencode-session';
+  const model        = ocSession.model || null;
 
-  // Group messages into user/assistant pairs chronologically
-  // assistant messages become prompts; their preceding user message provides input_text
+  // Session totals come straight off the session row (ms timestamps)
+  const sTs    = toMs(ocSession.time_created);
+  const inTok  = Number(ocSession.tokens_input  || 0);
+  const outTok = Number(ocSession.tokens_output || 0);
+  const reaTok = Number(ocSession.tokens_reasoning || 0);
+  const cacRd  = Number(ocSession.tokens_cache_read  || 0);
+  const cacWr  = Number(ocSession.tokens_cache_write || 0);
+
+  const cost = ocSession.cost != null
+    ? Number(ocSession.cost)
+    : estimateCost(model, { tokens_in: inTok, tokens_out: outTok + reaTok });
+
+  upsertSession({
+    id:                  sessionId,
+    tool:                'opencode',
+    started_at:          sTs,
+    project_path:        ocSession.directory || null,
+    project_name:        projectName,
+    model:               model,
+    total_input_tokens:  inTok,
+    total_output_tokens: outTok + reaTok,
+    total_cache_read:    cacRd,
+    total_cache_write:   cacWr,
+    equiv_cost_usd:      cost,
+  });
+
+  // Map for pairing tool-result parts to their tool-call (same id in data)
+  const toolCallIndex = new Map(); // part.data.id -> { promptId, name, order }
+
   let pendingUserParts = [];
 
   for (const msg of messages) {
-    // Load parts for this message
+    const data = readMessageData(msg);
+    const role = data && data.role ? String(data.role) : null;
+
     const parts = ocDb.prepare(
-      'SELECT * FROM parts WHERE message_id = ? ORDER BY rowid ASC'
+      'SELECT * FROM part WHERE message_id = ? ORDER BY time_created ASC'
     ).all(msg.id);
 
-    if (msg.role === 'user') {
-      // Accumulate user parts for the next assistant turn
+    if (role === 'user') {
       pendingUserParts = parts;
       continue;
     }
 
-    // Assistant message — this becomes a prompt row
-    if (msg.role !== 'assistant') continue;
+    if (role !== 'assistant') continue; // skip 'tool' messages here (handled via results)
 
-    // Only process messages newer than our last sync point
-    if (toMs(msg.created) <= sinceTs) {
-      pendingUserParts = [];
-      continue;
-    }
-
-    const usage   = extractTokens(parts);
-    const cost    = estimateCost('unknown', usage); // OpenCode may use various models
-    const msgTs   = toMs(msg.created); // OpenCode stores epoch ms
-
-    // Upsert session (accumulates token totals per call)
-    upsertSession({
-      id:                  sessionId,
-      tool:                'opencode',
-      started_at:          toMs(ocSession.created) || msgTs,
-      project_path:        null, // OpenCode doesn't expose CWD in DB
-      project_name:        projectName,
-      model:               null,
-      total_input_tokens:  usage.input_tokens,
-      total_output_tokens: usage.output_tokens,
-      total_cache_read:    usage.cache_read_tokens,
-      total_cache_write:   usage.cache_write_tokens,
-      equiv_cost_usd:      cost,
-    });
-
+    const msgTs = toMs(msg.time_created);
     const promptId = 'oc-' + msg.id;
+
+    // Per-message usage is not recorded by OpenCode; totals live on session.
     insertPrompt({
       id:                 promptId,
       session_id:         sessionId,
       timestamp:          msgTs,
-      model:              null,
-      input_text:         extractUserText(pendingUserParts),
-      input_tokens:       usage.input_tokens,
-      output_tokens:      usage.output_tokens,
-      cache_read_tokens:  usage.cache_read_tokens,
-      cache_write_tokens: usage.cache_write_tokens,
-      equiv_cost_usd:     cost,
+      model:              model,
+      input_text:         extractText(pendingUserParts),
+      input_tokens:       null,
+      output_tokens:      null,
+      cache_read_tokens:  null,
+      cache_write_tokens: null,
+      equiv_cost_usd:     null,
       raw_request:        null,
       raw_response:       null,
     });
 
-    // Map tool-call parts to tool_calls rows
-    // Pair each tool-call with its matching tool-result (by tool_call_id or rowid proximity)
-    const toolResultMap = new Map();
-    for (const p of parts) {
-      if (p.type === 'tool-result' && p.tool_call_id) {
-        toolResultMap.set(p.tool_call_id, p);
+    // Tool-call parts on this assistant message
+    let order = 0;
+    for (const part of parts) {
+      const d = readPartData(part);
+      if (!d) continue;
+      if (d.type === 'tool-call') {
+        const inputJson = parseCapped(d.input, PAYLOAD_CAP);
+        insertToolCall({
+          id:         'oc-' + (part.id || randomUUID()),
+          prompt_id:  promptId,
+          call_order: order,
+          call_type:  'tool-call',
+          name:       d.name || 'unknown',
+          input:      inputJson,
+          output:     null,
+          timestamp:  msgTs,
+        });
+        if (d.id) toolCallIndex.set(String(d.id), { promptId, name: d.name || 'unknown', order });
+        order += 1;
       }
     }
 
-    const toolCallParts = parts.filter(p => p.type === 'tool-call');
-    toolCallParts.forEach((part, i) => {
-      let inputJson  = null;
-      let outputJson = null;
+    pendingUserParts = []; // consumed by this assistant turn
+  }
 
-      // Cap raw strings before JSON parsing to avoid processing huge payloads
-      const rawIn  = part.input  ? String(part.input).slice(0, 4000)  : null;
-      const rawOut = result?.output ? String(result.output).slice(0, 4000) : null;
-      try { inputJson  = rawIn  ? JSON.stringify(JSON.parse(rawIn))  : null; } catch { inputJson  = rawIn;  }
-      const result = part.tool_call_id ? toolResultMap.get(part.tool_call_id) : null;
-      if (result) {
-        const rawOut2 = result.output ? String(result.output).slice(0, 4000) : null;
-        try { outputJson = rawOut2 ? JSON.stringify(JSON.parse(rawOut2)) : null; } catch { outputJson = rawOut2; }
-      }
+  // Second pass: tool-result parts (role='tool' messages) pair via data.id
+  for (const msg of messages) {
+    const data = readMessageData(msg);
+    if (!data || data.role !== 'tool') continue;
 
+    const parts = ocDb.prepare(
+      'SELECT * FROM part WHERE message_id = ? ORDER BY time_created ASC'
+    ).all(msg.id);
+
+    for (const part of parts) {
+      const d = readPartData(part);
+      if (!d || d.type !== 'tool-result') continue;
+      const call = toolCallIndex.get(String(d.id));
+      if (!call) continue; // result without a captured call in this window
+
+      const outVal = d.result && d.result.value !== undefined ? d.result.value : null;
+      const outputJson = parseCapped(outVal, PAYLOAD_CAP);
       insertToolCall({
         id:         'oc-' + (part.id || randomUUID()),
-        prompt_id:  promptId,
-        call_order: i,
-        call_type:  'tool',
-        name:       part.tool_name || 'unknown',
-        input:      inputJson ? inputJson.slice(0, 4000) : null,
-        output:     outputJson ? outputJson.slice(0, 4000) : null,
-        timestamp:  msgTs,
+        prompt_id:  call.promptId,
+        call_order: call.order,
+        call_type:  'tool-result',
+        name:       d.name || call.name,
+        input:      null,
+        output:     outputJson,
+        timestamp:  toMs(msg.time_created),
       });
-    });
-
-    pendingUserParts = []; // reset after consuming
+    }
   }
 }
 
 // ── Main sync ─────────────────────────────────────────────────────────────────
 
 /**
- * Open OpenCode DB readonly, query messages newer than cursor, sync to open-trace.
+ * Open OpenCode DB readonly, find sessions changed since cursor, sync them.
  */
 function syncOpenCode() {
-  if (isSyncing) return; // prevent overlapping syncs
+  if (isSyncing) return;
   isSyncing = true;
 
-  if (!existsSync(config.openCodeDbPath)) {
+  const dbPath = config.openCodeDbPath;
+  if (!dbPath || !existsSync(dbPath)) {
+    console.log('[opencode-watcher] OpenCode DB not found at ' + (dbPath || '(unset)'));
     isSyncing = false;
-    return; // DB doesn't exist yet — will retry on next file event
+    return;
   }
 
-  let ocDb;
+  let ocDb = null;
   try {
-    ocDb = new Database(config.openCodeDbPath, { readonly: true, fileMustExist: true });
+    ocDb = new Database(dbPath, { readonly: true, fileMustExist: true });
 
     const sinceTs = getLastSyncedAt();
 
-    // Fetch all sessions that have messages newer than sinceTs
+    // Sessions that have at least one message newer than the cursor
     const sessions = ocDb.prepare(`
       SELECT DISTINCT s.*
-      FROM sessions s
-      JOIN messages m ON m.session_id = s.id
-      WHERE m.created > ? OR m.created > ?
-      -- first param: sinceTs in ms (OpenCode stores ms), second: sinceTs in seconds (some versions store seconds)
-      ORDER BY s.created ASC
-    `).all(sinceTs, Math.floor(sinceTs / 1000));
+      FROM session s
+      JOIN message m ON m.session_id = s.id
+      WHERE m.time_created > ?
+      ORDER BY s.time_created ASC
+    `).all(sinceTs);
 
     let totalPrompts = 0;
-
     for (const ocSession of sessions) {
-      const messages = ocDb.prepare(`
-        SELECT * FROM messages WHERE session_id = ? ORDER BY created ASC
-      `).all(ocSession.id);
+      const messages = ocDb.prepare(
+        'SELECT * FROM message WHERE session_id = ? ORDER BY time_created ASC'
+      ).all(ocSession.id);
+      if (!messages.length) continue;
 
-      const newMsgCount = messages.filter(m => m.role === 'assistant' && m.created > sinceTs).length;
-      totalPrompts += newMsgCount;
+      const before = getDb().prepare(
+        'SELECT COUNT(*) AS c FROM prompts WHERE session_id = ?'
+      ).get('oc-' + ocSession.id).c;
 
-      processSession(ocSession, messages, ocDb, sinceTs);
+      processSession(ocSession, messages, ocDb);
+
+      const after = getDb().prepare(
+        'SELECT COUNT(*) AS c FROM prompts WHERE session_id = ?'
+      ).get('oc-' + ocSession.id).c;
+      totalPrompts += (after - before);
     }
 
-    if (totalPrompts > 0) {
-      console.log('[opencode-watcher] synced ' + totalPrompts + ' new prompt(s) from ' + sessions.length + ' session(s)');
-    }
+    console.log(
+      '[opencode-watcher] synced ' + totalPrompts + ' new prompt(s) from ' + sessions.length + ' session(s)'
+    );
   } catch (err) {
     console.error('[opencode-watcher] sync error:', err.message);
   } finally {
-    try { ocDb?.close(); } catch {}
+    if (ocDb) ocDb.close();
     isSyncing = false;
   }
 }
@@ -282,9 +331,9 @@ export function startOpenCodeWatcher() {
 
   // Watch both the DB and WAL file; WAL is written on every OpenCode commit
   const watcher = chokidar.watch([dbPath, walPath], {
-    persistent:   true,
-    ignoreInitial: false,  // false = emit "add" for existing files → triggers initial sync on startup
-    usePolling:   false,
+    persistent:    true,
+    ignoreInitial: false,  // false = emit 'add' for existing files → initial sync on startup
+    usePolling:    false,
   });
 
   const scheduleSync = () => {
