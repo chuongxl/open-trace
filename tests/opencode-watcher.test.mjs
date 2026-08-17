@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO = join(__dirname, "..", "..");
+const REPO = join(__dirname, "..");
 const BASE = 1750000000000;
 const API = "http" + "://localhost:";
 function createFixture(dir) {
