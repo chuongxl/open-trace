@@ -47,7 +47,7 @@ export function upsertSession(session) {
     add('total_output_tokens') +
     add('total_cache_read') +
     add('total_cache_write') +
-    '  equiv_cost_usd      = ' + (replace ? 'excluded.equiv_cost_usd' : 'equiv_cost_usd + excluded.equiv_cost_usd') + '\n' +
+    '  equiv_cost_usd      = ' + (replace ? 'excluded.equiv_cost_usd' : 'equiv_cost_usd + excluded.equiv_cost_usd') + ',\n' +
     '  project_path        = COALESCE(excluded.project_path, project_path),\n' +
     '  project_name        = COALESCE(excluded.project_name, project_name)\n' +
     '  ').run({
