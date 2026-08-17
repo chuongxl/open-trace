@@ -6,7 +6,9 @@
   "main": "daemon/index.js",
   "scripts": {
     "start": "node daemon/index.js",
-    "dev": "node --watch daemon/index.js"
+    "dev": "node --watch daemon/index.js",
+    "test": "node --test tests/",
+    "test:watch": "node --watch --test tests/"
   },
   "dependencies": {
     "express": "^4.19.2",
