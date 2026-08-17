@@ -1,12 +1,29 @@
 // Reference rates (public API pricing) used as efficiency metric only.
 // User is on subscription — these are NOT actual billing amounts.
 // All UI values MUST be labeled "equiv. cost".
+// Rates current as of Aug 2026 (platform.claude.com pricing).
+//
+// NOTE on rate limits (Aug 2026): every model is rate-limited — there is no
+// "unlimited" model. API rate limits scale with account Tier + model class:
+//   Haiku  <  Sonnet  <  Opus/Fable   (Haiku has the highest RPM/TPM by far)
+// On Claude subscription (Claude Code Pro/Max), message limits are weighted:
+// Haiku-tier messages count ~1 unit, Sonnet ~several, Opus/Fable the most.
+// → For dev-loop testing, Haiku 4.5 is the cheapest AND least-limit-heavy model.
 
 export const PRICING = {
   // Anthropic — per 1M tokens, USD
+  'claude-fable-5':             { input: 10.00, output: 50.00, cache_read: 1.50,  cache_write: 12.50 },
+  'claude-opus-5':              { input: 5.00,  output: 25.00, cache_read: 0.50,  cache_write: 6.25  },
+  'claude-opus-4-8':            { input: 5.00,  output: 25.00, cache_read: 0.50,  cache_write: 6.25  },
+  'claude-opus-4-7':            { input: 5.00,  output: 25.00, cache_read: 0.50,  cache_write: 6.25  },
+  'claude-opus-4-6':            { input: 5.00,  output: 25.00, cache_read: 0.50,  cache_write: 6.25  },
+  'claude-opus-4-5':            { input: 5.00,  output: 25.00, cache_read: 0.50,  cache_write: 6.25  },
   'claude-opus-4':              { input: 15.00, output: 75.00, cache_read: 1.50,  cache_write: 18.75 },
+  'claude-sonnet-5':            { input: 2.00,  output: 10.00, cache_read: 0.20,  cache_write: 2.50  },
+  'claude-sonnet-4-6':          { input: 3.00,  output: 15.00, cache_read: 0.30,  cache_write: 3.75  },
   'claude-sonnet-4-5':          { input: 3.00,  output: 15.00, cache_read: 0.30,  cache_write: 3.75  },
   'claude-sonnet-4':            { input: 3.00,  output: 15.00, cache_read: 0.30,  cache_write: 3.75  },
+  'claude-haiku-4-5':           { input: 1.00,  output: 5.00,  cache_read: 0.10,  cache_write: 1.25  },
   'claude-haiku-3-5':           { input: 0.80,  output: 4.00,  cache_read: 0.08,  cache_write: 1.00  },
   'claude-haiku-3':             { input: 0.25,  output: 1.25,  cache_read: 0.03,  cache_write: 0.30  },
   // OpenAI — per 1M tokens, USD

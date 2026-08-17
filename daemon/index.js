@@ -8,6 +8,7 @@ import { config } from './config.js';
 import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
 import { createClaudeProxy } from './proxy/claude-proxy.js';
+import { startOpenCodeWatcher } from './watchers/opencode-watcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -32,7 +33,7 @@ if (existsSync(dashDist)) {
 // Start Express dashboard/API server
 const server = createServer(app);
 server.listen(config.daemonPort, () => {
-  const addr = 'http://' + 'localhost:' + config.daemonPort;
+  const addr = 'http://' + 'localhost:' + server.address().port;
   console.log('[open-trace] Dashboard at ' + addr);
   console.log('[open-trace] DB: ' + config.dbPath);
 });
@@ -40,7 +41,11 @@ server.listen(config.daemonPort, () => {
 // Start Claude Code intercepting proxy
 createClaudeProxy(config.claudeProxyPort);
 
-process.on('SIGTERM', () => { server.close(); process.exit(0); });
-process.on('SIGINT',  () => { server.close(); process.exit(0); });
+// Start OpenCode SQLite watcher
+const ocWatcher = startOpenCodeWatcher();
+
+const shutdown = () => { server.close(); ocWatcher?.close(); process.exit(0); };
+process.on('SIGTERM', shutdown);
+process.on('SIGINT',  shutdown);
 
 export default app;

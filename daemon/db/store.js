@@ -26,28 +26,36 @@ export function getDb() {
  * upsertSession once per prompt without tracking cumulative state.
  */
 export function upsertSession(session) {
-  getDb().prepare(`
-    INSERT INTO sessions
-      (id, tool, started_at, project_path, project_name, model,
-       total_input_tokens, total_output_tokens, total_cache_read, total_cache_write, equiv_cost_usd)
-    VALUES
-      (@id, @tool, @started_at, @project_path, @project_name, @model,
-       @total_input_tokens, @total_output_tokens, @total_cache_read, @total_cache_write, @equiv_cost_usd)
-    ON CONFLICT(id) DO UPDATE SET
-      ended_at            = COALESCE(excluded.ended_at, ended_at),
-      model               = COALESCE(excluded.model, model),
-      total_input_tokens  = total_input_tokens  + excluded.total_input_tokens,
-      total_output_tokens = total_output_tokens + excluded.total_output_tokens,
-      total_cache_read    = total_cache_read    + excluded.total_cache_read,
-      total_cache_write   = total_cache_write   + excluded.total_cache_write,
-      equiv_cost_usd      = equiv_cost_usd      + excluded.equiv_cost_usd
-  `).run({
+  // __replaceTotals: watchers (OpenCode) pass LIFETIME totals for the session;
+  // set instead of accumulate to avoid double-counting on re-sync.
+  // Default (proxy): accumulate per-request deltas.
+  const replace  = session.__replaceTotals === true;
+  const params   = { ...session };
+  delete params.__replaceTotals;
+  const add = (col) => '      ' + col + ' = ' + (replace ? 'excluded.' + col : col + ' + excluded.' + col) + ',\n';
+  getDb().prepare(
+    'INSERT INTO sessions\n' +
+    '  (id, tool, started_at, project_path, project_name, model,\n' +
+    '   total_input_tokens, total_output_tokens, total_cache_read, total_cache_write, equiv_cost_usd)\n' +
+    'VALUES\n' +
+    '  (@id, @tool, @started_at, @project_path, @project_name, @model,\n' +
+    '   @total_input_tokens, @total_output_tokens, @total_cache_read, @total_cache_write, @equiv_cost_usd)\n' +
+    'ON CONFLICT(id) DO UPDATE SET\n' +
+    '  ended_at            = COALESCE(excluded.ended_at, ended_at),\n' +
+    '  model               = COALESCE(excluded.model, model),\n' +
+    add('total_input_tokens') +
+    add('total_output_tokens') +
+    add('total_cache_read') +
+    add('total_cache_write') +
+    '  equiv_cost_usd      = ' + (replace ? 'excluded.equiv_cost_usd' : 'equiv_cost_usd + excluded.equiv_cost_usd') + ',\n' +
+    '  project_path        = COALESCE(excluded.project_path, project_path),\n' +
+    '  project_name        = COALESCE(excluded.project_name, project_name)\n' +
+    '  ').run({
     total_input_tokens: 0, total_output_tokens: 0,
     total_cache_read: 0, total_cache_write: 0, equiv_cost_usd: 0,
-    project_name: null, model: null, ...session,
+    project_name: null, model: null, ...params,
   });
 }
-
 export function insertPrompt(prompt) {
   getDb().prepare(`
     INSERT OR IGNORE INTO prompts

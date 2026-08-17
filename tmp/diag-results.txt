@@ -1,0 +1,25 @@
+BRANCH: feat/phase-3-opencode-watcher
+HEAD: 20f8316 test: diag v2 - hard reset, run suite directly, publish
+PACKAGE_TEST:     "test": "node --test tests/*.test.mjs",     "test:watch": "node --watch --test tests/"   },   "dependencies": { 
+FILES: opencode-watcher.test.mjs 
+up to date in 280ms
+TAP version 13
+# Subtest: opencode watcher syncs a fixture session end to end
+not ok 1 - opencode watcher syncs a fixture session end to end
+  ---
+  duration_ms: 7.050125
+  type: 'test'
+  location: '/Users/chuongnd/github/ot-p4/tests/opencode-watcher.test.mjs:60:1'
+  failureType: 'testCodeFailure'
+  error: 'table session has 25 columns but 26 values were supplied'
+  code: 'SQLITE_ERROR'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 53.185584
