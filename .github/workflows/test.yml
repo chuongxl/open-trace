@@ -13,6 +13,8 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: set -o pipefail; npm test 2>&1 | tee /tmp/ot-test.log
+      - run: node tmp/dbg-daemon.mjs
+        if: always()
       - uses: actions/upload-artifact@v4
         if: always()
         with:
