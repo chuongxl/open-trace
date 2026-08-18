@@ -10,7 +10,7 @@ import Database from "better-sqlite3";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = join(__dirname, "..");
 const BASE = 1750000000000;
-const API = "http" + "://localhost:";
+const API = "http" + "://127.0.0.1:";
 function createFixture(dir) {
   const ocPath = join(dir, "opencode.db");
   const db = new Database(ocPath);
