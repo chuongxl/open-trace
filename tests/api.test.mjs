@@ -43,7 +43,7 @@ before(async () => {
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     const m = out.match(/http:\/\/localhost:(\d+)/);
-    if (m) { api = 'http://' + 'localhost:' + m[1]; break; }
+    if (m) { api = 'http://' + '127.0.0.1:' + m[1]; break; }
     await new Promise(r => setTimeout(r, 250));
   }
   assert.ok(api, 'daemon failed to report a port in 20s: ' + out.slice(-1500));
