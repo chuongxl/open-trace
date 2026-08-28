@@ -1,5 +1,7 @@
 # open-trace
 
+> ⚠️ **Work in progress.** This project is not complete and features described below are not fully functional yet. Waiting on the first version release — expect breaking changes.
+
 Local AI usage observatory — track every prompt, token, and tool call across Claude Code, OpenCode, and GitHub Copilot. No external API calls. Subscription-safe.
 
 ## Architecture
