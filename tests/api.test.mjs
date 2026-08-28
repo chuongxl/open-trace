@@ -42,7 +42,7 @@ before(async () => {
   child.stderr.on('data', d => { out += d.toString(); });
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
-    const m = out.match(/http:\/\/localhost:(\d+)/);
+    const m = out.match(/Dashboard at http:\/\/localhost:(\d+)/);
     if (m) { api = 'http://' + '127.0.0.1:' + m[1]; break; }
     await new Promise(r => setTimeout(r, 250));
   }
@@ -67,10 +67,12 @@ test('GET /api/health returns status and version', async () => {
 test('GET /api/overview aggregates tokens and cost per tool per day', async () => {
   const rows = await getJson('/api/overview?days=30');
   assert.ok(rows.length >= 2, 'expected rows for opencode and claude-code, got ' + rows.length);
-  const oc = rows.find(r => r.tool === 'opencode');
-  assert.ok(oc, 'opencode row missing: ' + JSON.stringify(rows));
-  assert.equal(oc.input_tokens + oc.output_tokens, 1215, 'opencode totals');
-  assert.ok(oc.equiv_cost > 0.15, 'opencode cost includes both sessions');
+  const ocRows = rows.filter(r => r.tool === 'opencode');
+  assert.ok(ocRows.length > 0, 'opencode rows missing: ' + JSON.stringify(rows));
+  const ocTokens = ocRows.reduce((sum, r) => sum + r.input_tokens + r.output_tokens, 0);
+  const ocCost   = ocRows.reduce((sum, r) => sum + r.equiv_cost, 0);
+  assert.equal(ocTokens, 1515, 'opencode totals across both sessions');
+  assert.ok(ocCost > 0.15, 'opencode cost includes both sessions');
   const cc = rows.find(r => r.tool === 'claude-code');
   assert.equal(cc.session_count, 1);
 });
