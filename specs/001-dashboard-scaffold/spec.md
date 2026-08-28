@@ -12,7 +12,8 @@ follow-on issues (#9, #10, #11); the WebLLM optimizer belongs to #12.
 
 ## Stack
 
-- Vite 6 + React 19 (JSX)
+- Vite 8 + React 19 (JSX), via `@vitejs/plugin-react`
+- Oxlint ships with the template (`.oxlintrc.json`, `npm run lint`) — not ESLint
 - TailwindCSS v4 (CSS-first `@theme` config), dark mode by default
 - react-router-dom v7 — declarative `<BrowserRouter>`/`<Routes>` (not the data-router/loader API;
   no route needs a loader yet since pages are placeholders)
@@ -35,7 +36,9 @@ Each placeholder page renders a heading + an empty-state message ("no data yet")
 
 - `App.jsx` — `<BrowserRouter>` + `<Routes>` + left sidebar layout, wraps routed content in
   `DaemonGate`.
-- `components/Sidebar.jsx` — left nav, links to the 5 top-level routes.
+- `components/Sidebar.jsx` — left nav, links to the 2 top-level routes (`/`, `/projects`); the 3
+  detail routes (`ProjectDetail`, `SessionDetail`, `PromptDetail`) are parameterized and reached
+  via parameterized links, to be added when #9/#10/#11 build real list-to-detail navigation.
 - `components/LoadingSkeleton.jsx` — generic skeleton block, reusable by future pages.
 - `components/DaemonGate.jsx` — on mount, calls `client.getHealth()`:
   - pending → renders `LoadingSkeleton`

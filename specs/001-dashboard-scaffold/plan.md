@@ -11,9 +11,10 @@ loaders) renders one of five placeholder pages inside a `DaemonGate` wrapper tha
 `GET /api/health` before showing content. `src/api/client.js` exports one fetch wrapper per
 endpoint in `daemon/api/router.js`; only `getHealth` is consumed in this plan.
 
-**Tech Stack:** Vite 6, React 19, TailwindCSS v4 (`@tailwindcss/vite`, CSS-first config),
-react-router-dom v7, recharts 2.x (installed, unused), lucide-react, `@mlc-ai/web-llm` (installed,
-unused).
+**Tech Stack:** Vite 8 (`@vitejs/plugin-react`), React 19, TailwindCSS v4 (`@tailwindcss/vite`,
+CSS-first config), react-router-dom v7, recharts 2.x (installed, unused), lucide-react,
+`@mlc-ai/web-llm` (installed, unused). Oxlint ships with the template (`.oxlintrc.json`,
+`npm run lint`), not ESLint.
 
 **Spec:** `specs/001-dashboard-scaffold/spec.md`
 
