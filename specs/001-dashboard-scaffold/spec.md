@@ -1,7 +1,7 @@
 # Dashboard Scaffold (Phase 5)
 
 **Source:** GitHub issue [#8](https://github.com/chuongxl/open-trace/issues/8) — `[Phase 5] Dashboard scaffold — Vite + React + Tailwind + routing`
-**Status:** approved
+**Status:** completed
 
 ## Overview
 
