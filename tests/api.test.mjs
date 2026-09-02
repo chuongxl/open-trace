@@ -86,6 +86,10 @@ test('GET /api/projects lists projects with session counts and totals', async ()
   assert.equal(a.total_tokens, 1500);
   assert.equal(Number(a.total_equiv_cost), 0.15);
   assert.ok(a.last_active, 'last_active present');
+  assert.equal(a.input_tokens, 1000, 'input_tokens breakdown');
+  assert.equal(a.output_tokens, 500, 'output_tokens breakdown');
+  assert.equal(a.cache_read, 100, 'cache_read breakdown');
+  assert.equal(a.cache_write, 50, 'cache_write breakdown');
 });
 
 test('GET /api/sessions paginates and filters by tool', async () => {

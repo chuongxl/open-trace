@@ -102,6 +102,10 @@ export function getProjects() {
       tool,
       COUNT(*)                                     AS session_count,
       SUM(total_input_tokens + total_output_tokens) AS total_tokens,
+      SUM(total_input_tokens)                       AS input_tokens,
+      SUM(total_output_tokens)                      AS output_tokens,
+      SUM(total_cache_read)                         AS cache_read,
+      SUM(total_cache_write)                        AS cache_write,
       SUM(equiv_cost_usd)                           AS total_equiv_cost,
       MAX(started_at)                               AS last_active
     FROM sessions
