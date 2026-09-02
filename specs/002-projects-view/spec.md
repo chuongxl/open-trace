@@ -1,7 +1,7 @@
 # Projects View (Phase 5)
 
 **Source:** GitHub issue [#9](https://github.com/chuongxl/open-trace/issues/9) — `[Phase 5] Feature: Projects view — folder, session count, total tokens`
-**Status:** in progress
+**Status:** completed
 **Classification:** Bounded — a page + 3 small presentational components built on the already-scaffolded dashboard (`specs/001-dashboard-scaffold/`) and the already-implemented `GET /api/projects` endpoint (Phase 4).
 
 ## Overview
