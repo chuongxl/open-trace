@@ -9,7 +9,10 @@ const COLORS = {
 export default function CostBadge({ cost }) {
   const tier = costTier(cost)
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${COLORS[tier]}`}>
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${COLORS[tier]}`}
+      title="equiv. cost (reference rate, not actual billing)"
+    >
       ${cost.toFixed(2)}
     </span>
   )

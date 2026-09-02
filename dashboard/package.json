@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node --test src/lib/format.test.mjs"
+    "test": "node --test src/lib/*.test.mjs"
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.84",
