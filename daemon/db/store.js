@@ -102,8 +102,16 @@ export function getProjects() {
       tool,
       COUNT(*)                                     AS session_count,
       SUM(total_input_tokens + total_output_tokens) AS total_tokens,
+      SUM(total_input_tokens)                       AS input_tokens,
+      SUM(total_output_tokens)                      AS output_tokens,
+      SUM(total_cache_read)                         AS cache_read,
+      SUM(total_cache_write)                        AS cache_write,
       SUM(equiv_cost_usd)                           AS total_equiv_cost,
-      MAX(started_at)                               AS last_active
+      MAX(CASE
+        WHEN COALESCE((SELECT MAX(timestamp) FROM prompts WHERE session_id = sessions.id), started_at) > started_at
+        THEN (SELECT MAX(timestamp) FROM prompts WHERE session_id = sessions.id)
+        ELSE started_at
+      END)                                          AS last_active
     FROM sessions
     WHERE project_path IS NOT NULL
     GROUP BY project_path, tool
