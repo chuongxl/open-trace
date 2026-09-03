@@ -89,4 +89,6 @@ cd dashboard && npm run dev
 
 ## Contributing
 
-Pick any open issue, branch from `main`, open a PR referencing the issue number.
+Pick any open issue, branch from `main`, and implement the feature using the
+`speckit-auto` skill. Your PR must include the generated `spec/{feature}`
+artifact for review, and reference the issue number.

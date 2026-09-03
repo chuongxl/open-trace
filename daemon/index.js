@@ -32,7 +32,7 @@ if (existsSync(dashDist)) {
 
 // Start Express dashboard/API server
 const server = createServer(app);
-server.listen(config.daemonPort, () => {
+server.listen(config.daemonPort, '127.0.0.1', () => {
   const addr = 'http://' + 'localhost:' + server.address().port;
   console.log('[open-trace] Dashboard at ' + addr);
   console.log('[open-trace] DB: ' + config.dbPath);

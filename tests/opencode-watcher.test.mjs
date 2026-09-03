@@ -10,7 +10,7 @@ import Database from "better-sqlite3";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = join(__dirname, "..");
 const BASE = 1750000000000;
-const API = "http" + "://localhost:";
+const API = "http" + "://127.0.0.1:";
 function createFixture(dir) {
   const ocPath = join(dir, "opencode.db");
   const db = new Database(ocPath);
@@ -71,7 +71,7 @@ test("opencode watcher syncs a fixture session end to end", async () => {
   child.stderr.on("data", d => { out += d.toString(); });
   try {
     const port = await waitFor(() => {
-      const m = out.match(/localhost:([0-9]+)/);
+      const m = out.match(/Dashboard at http:\/\/localhost:([0-9]+)/);
       return m ? m[1] : null;
     });
     assert.ok(port, "daemon failed to report a port: " + out);

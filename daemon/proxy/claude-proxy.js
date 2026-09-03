@@ -448,7 +448,7 @@ export function createClaudeProxy(port) {
   });
 
   server.listen(port, () => {
-    const addr = 'http://' + 'localhost:' + port;
+    const addr = 'http://' + 'localhost:' + server.address().port;
     console.log('[claude-proxy] Listening at ' + addr);
     console.log('[claude-proxy] Set ANTHROPIC_BASE_URL=' + addr + ' before running claude');
   });
