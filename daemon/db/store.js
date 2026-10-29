@@ -14,8 +14,17 @@ export function getDb() {
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     db.exec(SCHEMA);
+    migrate(db);
   }
   return db;
+}
+
+// Databases created before tool_use_id existed: CREATE TABLE IF NOT EXISTS won't add it.
+function migrate(db) {
+  if (!db.prepare('PRAGMA table_info(tool_calls)').all().some(c => c.name === 'tool_use_id')) {
+    db.exec('ALTER TABLE tool_calls ADD COLUMN tool_use_id TEXT');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tool_calls_use_id ON tool_calls(tool_use_id)');
 }
 
 // ─── Write methods ────────────────────────────────────────────────────────────
@@ -77,10 +86,15 @@ export function insertPrompt(prompt) {
 export function insertToolCall(call) {
   getDb().prepare(`
     INSERT OR IGNORE INTO tool_calls
-      (id, prompt_id, call_order, call_type, name, input, output, duration_ms, timestamp)
+      (id, prompt_id, call_order, tool_use_id, call_type, name, input, output, duration_ms, timestamp)
     VALUES
-      (@id, @prompt_id, @call_order, @call_type, @name, @input, @output, @duration_ms, @timestamp)
-  `).run({ duration_ms: null, input: null, output: null, ...call });
+      (@id, @prompt_id, @call_order, @tool_use_id, @call_type, @name, @input, @output, @duration_ms, @timestamp)
+  `).run({ duration_ms: null, input: null, output: null, tool_use_id: null, ...call });
+}
+
+/** Attach a tool's result once; the first captured output wins. */
+export function setToolCallOutput(toolUseId, output) {
+  getDb().prepare('UPDATE tool_calls SET output = ? WHERE tool_use_id = ? AND output IS NULL').run(output, toolUseId);
 }
 
 export function insertOptimization(opt) {
