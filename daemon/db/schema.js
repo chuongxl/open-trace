@@ -33,6 +33,7 @@ export const SCHEMA = `
     id          TEXT PRIMARY KEY,
     prompt_id   TEXT NOT NULL REFERENCES prompts(id),
     call_order  INTEGER NOT NULL,
+    tool_use_id TEXT,
     call_type   TEXT NOT NULL,
     name        TEXT NOT NULL,
     input       TEXT,
