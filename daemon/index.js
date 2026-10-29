@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { config } from './config.js';
 import apiRouter from './api/router.js';
@@ -23,11 +23,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/api', apiRouter);
 
 // Serve built dashboard if present (express.static is bundled with express)
-const dashDist = join(__dirname, '..', 'dashboard', 'dist');
+const dashDist = resolve(process.env.DASHBOARD_DIST ?? join(__dirname, '..', 'dashboard', 'dist'));
 if (existsSync(dashDist)) {
   app.use(express.static(dashDist));
   // SPA fallback: all non-API routes serve index.html
-  app.get('*', (_req, res) => res.sendFile(join(dashDist, 'index.html')));
+  app.get('/{*splat}', (_req, res) => res.sendFile(join(dashDist, 'index.html')));
 }
 
 // Start Express dashboard/API server
