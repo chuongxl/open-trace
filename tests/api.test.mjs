@@ -13,6 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = join(__dirname, '..');
 
 let tmp, api, child, out = '';
+let latestProjectActivity;
 
 before(async () => {
   tmp = mkdtempSync(join(tmpdir(), 'ot-api-'));
@@ -29,7 +30,8 @@ before(async () => {
   store.upsertSession({ id: 'sess-b', tool: 'claude-code', started_at: now - 7200000, ended_at: now - 7100000, project_path: projB, project_name: 'proj-b', model: 'claude-sonnet-4-5', total_input_tokens: 200, total_output_tokens: 100, total_cache_read: 0, total_cache_write: 0, equiv_cost_usd: 0.05 });
   store.upsertSession({ id: 'sess-c', tool: 'opencode', started_at: now - 3600000, ended_at: null, project_path: null, project_name: 'no-dir', model: 'claude-haiku-4-5', total_input_tokens: 10, total_output_tokens: 5, total_cache_read: 0, total_cache_write: 0, equiv_cost_usd: 0.001 });
   store.insertPrompt({ id: 'p1', session_id: 'sess-a', timestamp: now - 86300000, model: 'claude-haiku-4-5', input_text: 'first prompt', input_tokens: 500, output_tokens: 250, cache_read_tokens: 100, cache_write_tokens: 50, equiv_cost_usd: 0.08 });
-  store.insertPrompt({ id: 'p2', session_id: 'sess-a', timestamp: now - 86260000, model: 'claude-haiku-4-5', input_text: 'second prompt', input_tokens: 500, output_tokens: 250, cache_read_tokens: 0, cache_write_tokens: 0, equiv_cost_usd: 0.07 });
+  latestProjectActivity = now - 86260000;
+  store.insertPrompt({ id: 'p2', session_id: 'sess-a', timestamp: latestProjectActivity, model: 'claude-haiku-4-5', input_text: 'second prompt', input_tokens: 500, output_tokens: 250, cache_read_tokens: 0, cache_write_tokens: 0, equiv_cost_usd: 0.07 });
   store.insertToolCall({ id: 'tc1', prompt_id: 'p1', call_order: 0, call_type: 'tool', name: 'read_file', input: 'a.js', output: 'content', duration_ms: 120, timestamp: now - 86290000 });
   store.insertToolCall({ id: 'tc2', prompt_id: 'p1', call_order: 1, call_type: 'tool', name: 'search_files', input: 'TODO', output: '[]', duration_ms: 40, timestamp: now - 86280000 });
   store.insertOptimization({ id: 'opt1', prompt_id: 'p1', original_prompt: 'first prompt', optimized_prompt: 'optimized prompt text', improvement_notes: 'clearer', token_delta: -100, webllm_model: 'qwen2.5-7b', created_at: now });
@@ -86,6 +88,11 @@ test('GET /api/projects lists projects with session counts and totals', async ()
   assert.equal(a.total_tokens, 1500);
   assert.equal(Number(a.total_equiv_cost), 0.15);
   assert.ok(a.last_active, 'last_active present');
+  assert.equal(a.last_active, latestProjectActivity, 'last_active uses latest prompt activity');
+  assert.equal(a.input_tokens, 1000, 'input_tokens breakdown');
+  assert.equal(a.output_tokens, 500, 'output_tokens breakdown');
+  assert.equal(a.cache_read, 100, 'cache_read breakdown');
+  assert.equal(a.cache_write, 50, 'cache_write breakdown');
 });
 
 test('GET /api/sessions paginates and filters by tool', async () => {
