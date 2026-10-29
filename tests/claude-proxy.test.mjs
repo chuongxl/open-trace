@@ -77,3 +77,67 @@ test('non-streamed response is stored and reuses the session for the same cwd', 
   assert.equal(prompts.length, 2);
   assert.equal(store.getToolCalls(prompts[1].id)[0].name, 'Bash');
 });
+
+// ─── Tool results (issue #54) ────────────────────────────────────────────────
+// The result of turn N's tool_use arrives as a tool_result block in turn N+1's request.
+
+const toolStream = (...tools) => sse(
+  { type: 'message_start', message: { model: 'claude-sonnet-4-5', usage: { input_tokens: 10 } } },
+  ...tools.flatMap(([id, name, json], i) => [
+    { type: 'content_block_start', index: i, content_block: { type: 'tool_use', id, name, input: {} } },
+    { type: 'content_block_delta', index: i, delta: { type: 'input_json_delta', partial_json: json } },
+    { type: 'content_block_stop', index: i },
+  ]),
+  { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } },
+  { type: 'message_stop' },
+);
+
+const textReply = JSON.stringify({ type: 'message', model: 'claude-sonnet-4-5', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'done' }] });
+
+const nextTurn = (cwd, ...results) => ({
+  ...reqBody(cwd, 'go'), stream: false,
+  messages: [
+    { role: 'user', content: 'go' },
+    { role: 'assistant', content: results.map(r => ({ type: 'tool_use', id: r.id, name: 'x', input: {} })) },
+    { role: 'user', content: results.map(r => ({ type: 'tool_result', tool_use_id: r.id, content: r.content })) },
+  ],
+});
+
+const callsFor = (cwd) => {
+  const [session] = store.getSessions({ project: cwd });
+  return store.getPrompts(session.id).flatMap(p => store.getToolCalls(p.id));
+};
+
+test('tool_result in the next request fills the earlier tool call output', () => {
+  const cwd = '/tmp/proj-results';
+  proxy.parseStreamAndStore(reqBody(cwd, 'read it'), toolStream(['toolu_r1', 'Read', '{"file_path":"a.js"}']));
+  assert.equal(callsFor(cwd)[0].output, null, 'no output before the result arrives');
+
+  proxy.parseNonStreaming(nextTurn(cwd, { id: 'toolu_r1', content: 'file contents' }), textReply);
+  assert.equal(callsFor(cwd).find(c => c.name === 'Read').output, 'file contents');
+});
+
+test('parallel results and block-array content are matched by tool_use_id', () => {
+  const cwd = '/tmp/proj-parallel';
+  proxy.parseStreamAndStore(reqBody(cwd, 'both'), toolStream(['toolu_p1', 'Read', '{}'], ['toolu_p2', 'Bash', '{}']));
+
+  proxy.parseNonStreaming(nextTurn(cwd,
+    { id: 'toolu_p2', content: [{ type: 'text', text: 'line1' }, { type: 'text', text: 'line2' }] },
+    { id: 'toolu_p1', content: 'one' },
+  ), textReply);
+  const byName = Object.fromEntries(callsFor(cwd).map(c => [c.name, c.output]));
+  assert.equal(byName.Read, 'one');
+  assert.equal(byName.Bash, 'line1\nline2');
+});
+
+test('oversized output is capped; an existing output is never overwritten; unknown ids are ignored', () => {
+  const cwd = '/tmp/proj-cap';
+  proxy.parseStreamAndStore(reqBody(cwd, 'big'), toolStream(['toolu_c1', 'Read', '{}']));
+
+  proxy.parseNonStreaming(nextTurn(cwd, { id: 'toolu_c1', content: 'x'.repeat(10000) }, { id: 'toolu_unknown', content: 'orphan' }), textReply);
+  const first = callsFor(cwd)[0].output;
+  assert.ok(first.length <= 4001 && first.startsWith('xxx'), 'capped near 4000 chars, got ' + first.length);
+
+  proxy.parseNonStreaming(nextTurn(cwd, { id: 'toolu_c1', content: 'changed' }), textReply);
+  assert.equal(callsFor(cwd)[0].output, first, 'first captured output wins');
+});
