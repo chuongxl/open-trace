@@ -101,6 +101,12 @@ function getProjectInfo(reqBody) {
   };
 }
 
+/** Session id (derived first, so the map entry exists) plus project info. */
+function resolveSession(reqBody) {
+  const sessionId = deriveSessionId(reqBody);
+  return { sessionId, ...getProjectInfo(reqBody) };
+}
+
 /**
  * Extract the text of the last user-role message for storage.
  * Caps at 2000 chars to avoid bloating the DB.
@@ -199,7 +205,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
  * Parse a complete (non-streaming) Anthropic response and write to DB.
  * Extracts usage, model, and tool_use blocks from the response body.
  */
-function parseNonStreaming(reqBody, rawRespStr) {
+export function parseNonStreaming(reqBody, rawRespStr) {
   let resp;
   try { resp = JSON.parse(rawRespStr); } catch (err) {
     console.warn('[claude-proxy] non-streaming JSON parse failed:', err.message);
@@ -267,7 +273,7 @@ function forwardNonStreaming(reqBody, rawBody, req, res) {
  * message_delta, message_stop.
  * Malformed data: lines are individually try/caught; partial JSON is skipped.
  */
-function parseStreamAndStore(reqBody, sseText) {
+export function parseStreamAndStore(reqBody, sseText) {
   const events = [];
   for (const line of sseText.split('\n')) {
     if (!line.startsWith('data: ')) continue;
@@ -308,7 +314,7 @@ function parseStreamAndStore(reqBody, sseText) {
         break;
       }
       case 'content_block_stop': {
-        curId=null; // reset: subsequent non-tool deltas must not be misattributed
+        currentToolId = null; // reset: subsequent non-tool deltas must not be misattributed
         break;
       }
       case 'message_delta': {
