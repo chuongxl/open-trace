@@ -2,7 +2,7 @@
 ## Overview
 Local AI usage observatory.
 ## Conventions
-- ESM only, Node >= 18
+- ESM only, Node >= 22
 - Costs labeled equiv. cost only
 - Branch: feat/phase-N or fix/issue-N
 - Always PR -> review -> fix -> merge

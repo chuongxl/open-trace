@@ -20,7 +20,7 @@ CSS-first config), react-router-dom v7, recharts 2.x (installed, unused), lucide
 
 ## Global Constraints
 
-- ESM only, Node >= 18 (repo-wide, `CLAUDE.md`).
+- ESM only, Node >= 22 (repo-wide, `CLAUDE.md`).
 - Scaffold-only scope: pages are placeholders (title + "No data yet."); the only live API call in
   this plan is `DaemonGate`'s `getHealth()`. Real data wiring is out of scope (issues #9/#10/#11).
 - No test framework is added to `dashboard/`. Verification = `npm run build` (must exit 0) plus
