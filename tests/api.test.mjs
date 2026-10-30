@@ -114,6 +114,18 @@ test('GET /api/sessions/:id returns session with ordered prompts', async () => {
   assert.equal(s.prompts[1].id, 'p2');
 });
 
+test('GET /api/sessions/:id prompts are slim: tool_call_count, no raw payloads', async () => {
+  const s = await getJson('/api/sessions/sess-a');
+  assert.equal(s.prompts[0].tool_call_count, 2);
+  assert.equal(s.prompts[1].tool_call_count, 0);
+  for (const p of s.prompts) {
+    assert.ok(!('raw_request' in p) && !('raw_response' in p), 'raw payload columns are not sent in the session list');
+    assert.equal(typeof p.input_text, 'string');
+  }
+  const full = await getJson('/api/prompts/p1');
+  assert.ok('raw_request' in full, 'the single-prompt endpoint still returns the full row');
+});
+
 test('GET /api/sessions/:id returns 404 for unknown session', async () => {
   await getJson('/api/sessions/nope', 404);
 });

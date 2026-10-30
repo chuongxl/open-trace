@@ -148,8 +148,14 @@ export function getSession(id) {
   return getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(id);
 }
 
+// Session-list rows: everything except the (up to 64 KB) raw payloads, plus the call count.
 export function getPrompts(sessionId) {
-  return getDb().prepare('SELECT * FROM prompts WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId);
+  return getDb().prepare(`
+    SELECT p.id, p.session_id, p.timestamp, p.model, p.input_text,
+           p.input_tokens, p.output_tokens, p.cache_read_tokens, p.cache_write_tokens, p.equiv_cost_usd,
+           (SELECT COUNT(DISTINCT call_order) FROM tool_calls t WHERE t.prompt_id = p.id) AS tool_call_count
+    FROM prompts p WHERE p.session_id = ? ORDER BY p.timestamp ASC
+  `).all(sessionId);
 }
 
 export function getPrompt(id) {
@@ -157,7 +163,7 @@ export function getPrompt(id) {
 }
 
 export function getToolCalls(promptId) {
-  return getDb().prepare('SELECT * FROM tool_calls WHERE prompt_id = ? ORDER BY call_order ASC').all(promptId);
+  return getDb().prepare('SELECT * FROM tool_calls WHERE prompt_id = ? ORDER BY call_order ASC, timestamp ASC').all(promptId);
 }
 
 export function getOptimization(promptId) {
