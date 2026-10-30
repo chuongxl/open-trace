@@ -98,9 +98,9 @@ test("opencode watcher syncs a fixture session end to end", async () => {
     const det = await waitFor(async () => {
       const r = await fetch(API + port + "/api/sessions/" + s.id);
       const j = await r.json();
-      return j.prompts.length === 2 ? j : null;
+      return j.prompts.length === 1 && j.prompts[0].request_count === 2 ? j : null;
     });
-    assert.ok(det, "expected 2 prompts (assistant messages) synced");
+    assert.ok(det, "expected 1 user turn grouping 2 assistant messages (#74)");
     const p1 = det.prompts[0];
     assert.equal(p1.input_text, "Refactor the auth module");
     const pc = await (await fetch(API + port + "/api/prompts/" + p1.id)).json();
@@ -115,7 +115,7 @@ test("opencode watcher syncs a fixture session end to end", async () => {
     const det2 = await waitFor(async () => {
       const r = await fetch(API + port + "/api/sessions/" + s.id);
       const j = await r.json();
-      return j.prompts.length === 3 ? j : null;
+      return j.prompts.length === 2 ? j : null;
     });
     assert.ok(det2, "new prompt from follow-up message not synced; log: " + out);
     const s2 = (await (await fetch(API + port + "/api/sessions?tool=opencode")).json())[0];

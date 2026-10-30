@@ -141,3 +141,12 @@ test('oversized output is capped; an existing output is never overwritten; unkno
   proxy.parseNonStreaming(nextTurn(cwd, { id: 'toolu_c1', content: 'changed' }), textReply);
   assert.equal(callsFor(cwd)[0].output, first, 'first captured output wins');
 });
+
+test('a tool_result request stores no prompt text, even with a text block beside it (#74)', () => {
+  const cwd = '/tmp/proj-continuation';
+  const req = nextTurn(cwd, { id: 'toolu_k1', content: 'ok' });
+  req.messages[2].content.push({ type: 'text', text: '<system-reminder>noise</system-reminder>' });
+  proxy.parseNonStreaming(req, textReply);
+  const [session] = store.getSessions({ project: cwd });
+  assert.equal(store.getPrompts(session.id)[0].input_text, null);
+});

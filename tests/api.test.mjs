@@ -172,3 +172,41 @@ test('POST /api/optimizations saves and retrieves a WebLLM result', async () => 
   const miss = await getJson('/api/optimizations/none');
   assert.equal(miss, null);
 });
+
+test('tool-loop continuation requests group under the user prompt that started them (#74)', async () => {
+  const store = await import('../daemon/db/store.js');
+  const t = Date.now() + 1000;
+  store.upsertSession({ id: 'sess-turns', tool: 'claude-code', started_at: t, project_path: null, project_name: 'turns', model: 'm', equiv_cost_usd: 0 });
+  const p = (id, i, text, tok, cost) => store.insertPrompt({ id, session_id: 'sess-turns', timestamp: t + i, input_text: text, input_tokens: tok, output_tokens: tok, equiv_cost_usd: cost });
+  const c = (id, prompt, order, name) => store.insertToolCall({ id, prompt_id: prompt, call_order: order, call_type: 'tool', name, timestamp: t });
+  p('u1', 1, 'fix the bug', 10, 0.1);  c('c1', 'u1', 0, 'Read'); c('c2', 'u1', 1, 'Grep');
+  p('k1', 2, null, 20, 0.2);           c('c3', 'k1', 0, 'Edit');
+  p('k2', 3, '', 30, 0.3);             c('c4', 'k2', 0, 'Bash'); c('c5', 'k2', 1, 'Bash');
+  p('u2', 4, 'thanks', 5, 0.05);
+
+  const s = await getJson('/api/sessions/sess-turns');
+  assert.deepEqual(s.prompts.map(x => x.id), ['u1', 'u2'], 'continuations are not separate rows');
+  const [turn, next] = s.prompts;
+  assert.equal(turn.input_text, 'fix the bug');
+  assert.equal(turn.input_tokens, 60);
+  assert.equal(turn.output_tokens, 60);
+  assert.ok(Math.abs(turn.equiv_cost_usd - 0.6) < 1e-9);
+  assert.equal(turn.tool_call_count, 5);
+  assert.equal(turn.request_count, 3);
+  assert.equal(next.tool_call_count, 0);
+  assert.equal(next.request_count, 1);
+
+  const full = await getJson('/api/prompts/u1');
+  assert.deepEqual(full.tool_calls.map(x => x.name), ['Read', 'Grep', 'Edit', 'Bash', 'Bash'], 'calls in request order');
+  assert.deepEqual(full.tool_calls.map(x => x.call_order), [0, 1, 2, 3, 4], 'call_order renumbered across requests');
+  assert.equal(full.input_tokens, 60);
+});
+
+test('a session that starts mid-loop keeps its leading continuation as its own row (#74)', async () => {
+  const store = await import('../daemon/db/store.js');
+  const t = Date.now() + 5000;
+  store.upsertSession({ id: 'sess-orphan', tool: 'claude-code', started_at: t, project_path: null, project_name: 'o', model: 'm', equiv_cost_usd: 0 });
+  store.insertPrompt({ id: 'o1', session_id: 'sess-orphan', timestamp: t, input_text: null, input_tokens: 1 });
+  const s = await getJson('/api/sessions/sess-orphan');
+  assert.deepEqual(s.prompts.map(x => x.id), ['o1']);
+});

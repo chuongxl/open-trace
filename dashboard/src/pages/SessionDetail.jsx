@@ -68,6 +68,7 @@ export default function SessionDetail() {
                   <Link to={`/prompts/${encodeURIComponent(p.id)}`} className="block truncate text-sky-400 hover:underline">
                     {p.input_text || '(no prompt text)'}
                   </Link>
+                  {p.request_count > 1 && <span className="text-xs text-neutral-500">{p.request_count} requests</span>}
                 </td>
                 <td className="whitespace-nowrap py-2 pr-3 text-neutral-300">
                   {formatTokenCount(p.input_tokens)} / {formatTokenCount(p.output_tokens)}
