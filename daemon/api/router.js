@@ -41,38 +41,23 @@ router.get('/sessions/:id/memory', (req, res) => {
   const session = store.getSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
-  const files = [];
-
-  // Project-local memory
+  // Instruction/memory files the AI loads for this project, most specific first.
+  const candidates = [];
   if (session.project_path) {
-    const localPath = join(session.project_path, '.claude', 'memory.md');
-    if (existsSync(localPath)) {
-      try {
-        const stat = statSync(localPath);
-        files.push({
-          path: localPath,
-          display: '.claude/memory.md (project)',
-          content: readFileSync(localPath, 'utf8'),
-          size: stat.size,
-          modified_at: stat.mtimeMs,
-        });
-      } catch {}
-    }
+    candidates.push(
+      { path: join(session.project_path, 'CLAUDE.md'), display: 'CLAUDE.md (project)' },
+      { path: join(session.project_path, '.claude', 'memory.md'), display: '.claude/memory.md (project)' },
+    );
   }
+  candidates.push({ path: join(homedir(), '.claude', 'CLAUDE.md'), display: '~/.claude/CLAUDE.md (global)' });
 
-  // Global CLAUDE.md
-  const globalPath = join(homedir(), '.claude', 'CLAUDE.md');
-  if (existsSync(globalPath)) {
+  const files = [];
+  for (const { path, display } of candidates) {
+    if (!existsSync(path)) continue;
     try {
-      const stat = statSync(globalPath);
-      files.push({
-        path: globalPath,
-        display: '~/.claude/CLAUDE.md (global)',
-        content: readFileSync(globalPath, 'utf8'),
-        size: stat.size,
-        modified_at: stat.mtimeMs,
-      });
-    } catch {}
+      const stat = statSync(path);
+      files.push({ path, display, content: readFileSync(path, 'utf8'), size: stat.size, modified_at: stat.mtimeMs });
+    } catch { /* unreadable file: skip */ }
   }
 
   res.json({ files });
