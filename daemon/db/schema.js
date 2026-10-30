@@ -25,6 +25,8 @@ export const SCHEMA = `
     cache_read_tokens  INTEGER DEFAULT 0,
     cache_write_tokens INTEGER DEFAULT 0,
     equiv_cost_usd     REAL DEFAULT 0,
+    first_token_ms     INTEGER,
+    request_ms         INTEGER,
     raw_request        TEXT,
     raw_response       TEXT
   );

@@ -24,7 +24,10 @@ function Step({ step }) {
           {step.kind}:{displayName(step.name)}
         </span>
         {summary && <span className="truncate text-neutral-500">← {summary}</span>}
-        <span className="ml-auto shrink-0 text-xs text-neutral-500">
+        <span
+          className="ml-auto shrink-0 text-xs text-neutral-500"
+          title="Start offset from the prompt; duration includes any wait for approval"
+        >
           {step.startMs !== null && <>+{formatDuration(step.startMs)}</>}
           {step.durationMs !== null && <> · {formatDuration(step.durationMs)}</>}
           {step.startMs === null && step.durationMs === null && <>#{step.order + 1}</>}
