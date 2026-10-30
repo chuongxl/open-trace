@@ -1,6 +1,17 @@
 const BASE = '/api'
 
-async function request(path, options) {
+// Mutating calls need the per-install token, which the daemon only serves to the dashboard origin.
+let tokenPromise
+function getToken() {
+  tokenPromise ??= fetch(`${BASE}/token`).then((r) => r.json()).then((j) => j.token)
+  tokenPromise.catch(() => { tokenPromise = undefined })
+  return tokenPromise
+}
+
+async function request(path, options = {}) {
+  if (options.method && options.method !== 'GET') {
+    options = { ...options, headers: { ...options.headers, Authorization: `Bearer ${await getToken()}` } }
+  }
   const res = await fetch(`${BASE}${path}`, options)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))

@@ -160,9 +160,10 @@ test('GET /api/prompts/:id returns 404 for unknown prompt', async () => {
 });
 
 test('POST /api/optimizations saves and retrieves a WebLLM result', async () => {
+  const { token } = await getJson('/api/token');
   const res = await fetch(api + '/api/optimizations', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ id: 'opt2', prompt_id: 'p2', original_prompt: 'raw', optimized_prompt: 'better', improvement_notes: 'shorter', token_delta: -50, webllm_model: 'qwen2.5-7b' }),
   });
   assert.equal(res.status, 200, await res.text());
