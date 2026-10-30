@@ -22,6 +22,7 @@ before(async () => {
   mkdirSync(join(projA, '.claude'), { recursive: true });
   mkdirSync(projB, { recursive: true });
   writeFileSync(join(projA, '.claude', 'memory.md'), '# Project memory\nKey decisions here.');
+  writeFileSync(join(projA, 'CLAUDE.md'), '# Conventions\n- ESM only');
 
   process.env.DB_PATH = join(tmp, 'open-trace.db');
   const store = await import('../daemon/db/store.js');
@@ -132,11 +133,15 @@ test('GET /api/sessions/:id returns 404 for unknown session', async () => {
 
 test('GET /api/sessions/:id/memory reads project memory file', async () => {
   const m = await getJson('/api/sessions/sess-a/memory');
-  const proj = m.files.find(f => f.display.includes('project'));
+  const proj = m.files.find(f => f.display === '.claude/memory.md (project)');
   assert.ok(proj, 'project memory file present: ' + JSON.stringify(m.files));
   assert.ok(proj.content.includes('Key decisions'), 'memory content read');
   assert.ok(proj.size > 0);
   assert.ok(proj.modified_at > 0);
+  const root = m.files.find(f => f.display === 'CLAUDE.md (project)');
+  assert.ok(root, 'project root CLAUDE.md present: ' + JSON.stringify(m.files.map(f => f.display)));
+  assert.ok(root.content.includes('ESM only'));
+  assert.equal(m.files[0].display, 'CLAUDE.md (project)', 'root CLAUDE.md is listed first');
   const m2 = await getJson('/api/sessions/sess-b/memory');
   assert.ok(Array.isArray(m2.files), 'missing file degrades to empty array');
 });
