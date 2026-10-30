@@ -30,6 +30,22 @@ const MAX_RAW_BYTES       = 32_000;          // cap stored request/response
 const MAX_TOOL_BYTES      = 4_000;           // cap stored tool input/output
 const ANTHROPIC_HOST      = 'api.anthropic.com';
 
+// Where requests are forwarded. Overridable via createClaudeProxy(port, { upstream }) for tests.
+let upstream = { hostname: ANTHROPIC_HOST, port: 443, tls: true };
+const upstreamRequest = (options, cb) =>
+  (upstream.tls ? https : http).request({ ...options, hostname: upstream.hostname, port: upstream.port, headers: { ...options.headers, host: upstream.hostname } }, cb);
+
+// ─── Request pipeline (Phase 12c, #55) ───────────────────────────────────────
+
+/**
+ * Optional async hook run after the request body is buffered and before it is forwarded.
+ * Called with { requestId, body (parsed JSON), headers, signal (aborts if the client disconnects) }.
+ * It may hold the request by not resolving yet, and may resolve { body } to replace the request.
+ * No hook = byte-identical pass-through.
+ */
+let requestHook = null;
+export function setRequestHook(fn) { requestHook = fn; }
+
 // ─── Session correlation (issue #5) ──────────────────────────────────────────
 
 /**
@@ -257,17 +273,11 @@ export function parseNonStreaming(reqBody, rawRespStr, timing) {
  * Forward a non-streaming request to api.anthropic.com.
  * Buffers the full response, returns it to Claude Code, then parses and stores.
  */
-function forwardNonStreaming(reqBody, rawBody, req, res) {
+function forwardNonStreaming(reqBody, rawBody, req, res, headers) {
   const startedAt = Date.now();
-  const options = {
-    hostname: ANTHROPIC_HOST,
-    port: 443,
-    path: req.url,
-    method: req.method,
-    headers: { ...req.headers, host: ANTHROPIC_HOST },
-  };
+  const options = { path: req.url, method: req.method, headers };
 
-  const proxyReq = https.request(options, proxyRes => {
+  const proxyReq = upstreamRequest(options, proxyRes => {
     const chunks = [];
     proxyRes.on('data', c => chunks.push(c));
     proxyRes.on('end', () => {
@@ -376,18 +386,12 @@ export function parseStreamAndStore(reqBody, sseText, timing) {
  * Tees each chunk: forwards to client immediately AND buffers for parsing.
  * DB write happens after the stream ends (message_stop received).
  */
-function forwardStreaming(reqBody, rawBody, req, res) {
+function forwardStreaming(reqBody, rawBody, req, res, headers) {
   const startedAt = Date.now();
   let firstTokenAt = null;
-  const options = {
-    hostname: ANTHROPIC_HOST,
-    port: 443,
-    path: req.url,
-    method: req.method,
-    headers: { ...req.headers, host: ANTHROPIC_HOST },
-  };
+  const options = { path: req.url, method: req.method, headers };
 
-  const proxyReq = https.request(options, proxyRes => {
+  const proxyReq = upstreamRequest(options, proxyRes => {
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
     const sseChunks = [];
     proxyRes.on('data', chunk => {
@@ -426,10 +430,9 @@ function handleRequest(req, res) {
 
   if (!isMessages) {
     // Pass-through: pipe directly to Anthropic (models, count_tokens, etc.)
-    const fwd = https.request({
-      hostname: ANTHROPIC_HOST, port: 443,
+    const fwd = upstreamRequest({
       path: req.url, method: req.method,
-      headers: { ...req.headers, host: ANTHROPIC_HOST },
+      headers: req.headers,
     }, pr => { res.writeHead(pr.statusCode, pr.headers); pr.pipe(res); });
     fwd.on('error', err => {
       console.error('[claude-proxy] pass-through error:', err.message);
@@ -446,16 +449,36 @@ function handleRequest(req, res) {
     console.error('[claude-proxy] request read error:', err.message);
     if (!res.headersSent) { res.writeHead(500); res.end(); }
   });
-  req.on('end', () => {
-    const rawBody = Buffer.concat(chunks);
+  req.on('end', async () => {
+    let rawBody = Buffer.concat(chunks);
     let reqBody = {};
+    let parsed = true;
     try { reqBody = JSON.parse(rawBody.toString('utf8')); }
-    catch { /* non-JSON body: forward as-is via non-streaming path */ }
+    catch { parsed = false; /* non-JSON body: forward as-is via non-streaming path */ }
+
+    let headers = req.headers;
+    if (requestHook && parsed) {
+      const ctrl = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) ctrl.abort(); });
+      try {
+        const out = await requestHook({ requestId: randomUUID(), body: reqBody, headers: req.headers, signal: ctrl.signal });
+        if (ctrl.signal.aborted) return; // client left while held: nothing to forward
+        if (out?.body) {
+          reqBody = out.body;
+          rawBody = Buffer.from(JSON.stringify(reqBody), 'utf8');
+          headers = { ...req.headers, 'content-length': String(rawBody.length) };
+          delete headers['transfer-encoding'];
+        }
+      } catch (err) {
+        console.error('[claude-proxy] request hook failed, forwarding unchanged:', err.message);
+        if (ctrl.signal.aborted) return;
+      }
+    }
 
     if (reqBody.stream === true) {
-      forwardStreaming(reqBody, rawBody, req, res);
+      forwardStreaming(reqBody, rawBody, req, res, headers);
     } else {
-      forwardNonStreaming(reqBody, rawBody, req, res);
+      forwardNonStreaming(reqBody, rawBody, req, res, headers);
     }
   });
 }
@@ -468,9 +491,11 @@ function handleRequest(req, res) {
  * will be intercepted, stored, and forwarded to api.anthropic.com.
  *
  * @param {number} port - Port to listen on (typically config.claudeProxyPort = 9876)
+ * @param {{upstream?: {hostname: string, port: number, tls: boolean}}} [opts]
  * @returns {http.Server}
  */
-export function createClaudeProxy(port) {
+export function createClaudeProxy(port, opts = {}) {
+  if (opts.upstream) upstream = opts.upstream;
   const server = http.createServer(handleRequest);
 
   server.on('error', err => {
