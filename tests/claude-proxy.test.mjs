@@ -150,3 +150,30 @@ test('a tool_result request stores no prompt text, even with a text block beside
   const [session] = store.getSessions({ project: cwd });
   assert.equal(store.getPrompts(session.id)[0].input_text, null);
 });
+
+test('request timing: start, time to first token, and tool duration (#75)', () => {
+  const cwd = '/tmp/proj-timing';
+  proxy.parseStreamAndStore(reqBody(cwd, 'go'), toolStream(['toolu_t1', 'Bash', '{"command":"ls"}']), { startedAt: 1000, firstTokenAt: 1300, endedAt: 2000 });
+  const [session] = store.getSessions({ project: cwd });
+  const [prompt] = store.getPrompts(session.id);
+  assert.equal(prompt.timestamp, 1000, 'prompt time is the request start');
+  assert.equal(prompt.first_token_ms, 300);
+  assert.equal(prompt.request_ms, 1000);
+  let [call] = store.getToolCalls(prompt.id);
+  assert.equal(call.timestamp, 2000, 'call time is the response end');
+  assert.equal(call.duration_ms, null, 'unknown until the result arrives');
+
+  // The next request arrives 3.5 s after the response ended: tool run + any approval wait.
+  proxy.parseNonStreaming(nextTurn(cwd, { id: 'toolu_t1', content: 'ok' }), textReply, { startedAt: 5500, endedAt: 6000 });
+  [call] = store.getToolCalls(prompt.id).filter(c => c.name === 'Bash');
+  assert.equal(call.duration_ms, 3500);
+});
+
+test('without timing info the proxy still stores rows and leaves timing null (#75)', () => {
+  const cwd = '/tmp/proj-notiming';
+  proxy.parseStreamAndStore(reqBody(cwd, 'go'), STREAM);
+  const [session] = store.getSessions({ project: cwd });
+  const [prompt] = store.getPrompts(session.id);
+  assert.equal(prompt.first_token_ms, null);
+  assert.equal(prompt.request_ms, null);
+});

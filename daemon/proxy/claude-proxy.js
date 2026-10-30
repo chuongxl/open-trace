@@ -140,7 +140,7 @@ function capJson(obj, maxBytes) {
  * Tool results for turn N's tool_use blocks arrive as tool_result blocks in the
  * last user message of turn N+1's request. Attach each to its stored call.
  */
-function captureToolResults(messages) {
+function captureToolResults(messages, arrivedAt) {
   const last = Array.isArray(messages) ? messages[messages.length - 1] : null;
   if (last?.role !== 'user' || !Array.isArray(last.content)) return;
   for (const b of last.content) {
@@ -148,7 +148,7 @@ function captureToolResults(messages) {
     const text = typeof b.content === 'string' ? b.content
       : Array.isArray(b.content) ? b.content.map(c => c.type === 'text' ? c.text : '[' + c.type + ']').join('\n')
       : '';
-    setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text);
+    setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text, arrivedAt);
   }
 }
 
@@ -162,12 +162,15 @@ function captureToolResults(messages) {
  * @param {Array}  toolUses  - Array of {id, name, input} objects from tool_use blocks
  * @param {string} rawReq    - Capped raw request JSON for storage
  * @param {string} rawResp   - Capped raw response text for storage
+ * @param {{startedAt?: number, firstTokenAt?: number, endedAt?: number}} timing - epoch ms; absent fields stay null
  */
-function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
+function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp, timing = {}) {
   try {
     const { sessionId, projectPath, projectName } = resolveSession(reqBody);
     const cost = estimateCost(model, usage);
-    captureToolResults(reqBody.messages);
+    const endedAt = timing.endedAt ?? Date.now();
+    const startedAt = timing.startedAt ?? endedAt;
+    captureToolResults(reqBody.messages, timing.startedAt);
 
     upsertSession({
       id:                  sessionId,
@@ -187,7 +190,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
     insertPrompt({
       id:                 promptId,
       session_id:         sessionId,
-      timestamp:          Date.now(),
+      timestamp:          startedAt,
       model,
       input_text:         extractUserText(reqBody.messages),
       input_tokens:       usage.input_tokens       || 0,
@@ -195,6 +198,8 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
       cache_read_tokens:  usage.cache_read_tokens  || 0,
       cache_write_tokens: usage.cache_write_tokens || 0,
       equiv_cost_usd:     cost,
+      first_token_ms:     timing.startedAt != null && timing.firstTokenAt != null ? timing.firstTokenAt - timing.startedAt : null,
+      request_ms:         timing.startedAt != null ? endedAt - timing.startedAt : null,
       raw_request:        rawReq,
       raw_response:       rawResp,
     });
@@ -209,7 +214,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
         name:       tool.name,
         input:      capJson(tool.input, MAX_TOOL_BYTES),
         output:     null,
-        timestamp:  Date.now(),
+        timestamp:  endedAt, // duration is set when the result arrives
       });
     });
     console.log('[claude-proxy] stored: model='+model+' in='+(usage.input_tokens||0)+' out='+(usage.output_tokens||0)+' tools='+toolUses.length+' sid='+sessionId.slice(0,8));
@@ -224,7 +229,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
  * Parse a complete (non-streaming) Anthropic response and write to DB.
  * Extracts usage, model, and tool_use blocks from the response body.
  */
-export function parseNonStreaming(reqBody, rawRespStr) {
+export function parseNonStreaming(reqBody, rawRespStr, timing) {
   let resp;
   try { resp = JSON.parse(rawRespStr); } catch (err) {
     console.warn('[claude-proxy] non-streaming JSON parse failed:', err.message);
@@ -245,7 +250,7 @@ export function parseNonStreaming(reqBody, rawRespStr) {
   const rawResp  = rawRespStr.length > MAX_RAW_BYTES
     ? rawRespStr.slice(0, MAX_RAW_BYTES) + '\u2026' : rawRespStr;
 
-  writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp);
+  writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp, timing);
 }
 
 /**
@@ -253,6 +258,7 @@ export function parseNonStreaming(reqBody, rawRespStr) {
  * Buffers the full response, returns it to Claude Code, then parses and stores.
  */
 function forwardNonStreaming(reqBody, rawBody, req, res) {
+  const startedAt = Date.now();
   const options = {
     hostname: ANTHROPIC_HOST,
     port: 443,
@@ -269,7 +275,7 @@ function forwardNonStreaming(reqBody, rawBody, req, res) {
       res.writeHead(proxyRes.statusCode, proxyRes.headers);
       res.end(rawResp);
       if (proxyRes.statusCode === 200) {
-        try { parseNonStreaming(reqBody, rawResp.toString('utf8')); }
+        try { parseNonStreaming(reqBody, rawResp.toString('utf8'), { startedAt, endedAt: Date.now() }); }
         catch (err) { console.error('[claude-proxy] parse error:', err.message); }
       }
     });
@@ -292,7 +298,7 @@ function forwardNonStreaming(reqBody, rawBody, req, res) {
  * message_delta, message_stop.
  * Malformed data: lines are individually try/caught; partial JSON is skipped.
  */
-export function parseStreamAndStore(reqBody, sseText) {
+export function parseStreamAndStore(reqBody, sseText, timing) {
   const events = [];
   for (const line of sseText.split('\n')) {
     if (!line.startsWith('data: ')) continue;
@@ -362,7 +368,7 @@ export function parseStreamAndStore(reqBody, sseText) {
   const rawReq  = capJson(reqBody, MAX_RAW_BYTES);
   const rawResp = sseText.length > MAX_RAW_BYTES ? sseText.slice(0, MAX_RAW_BYTES) + '\u2026' : sseText;
 
-  writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp);
+  writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp, timing);
 }
 
 /**
@@ -371,6 +377,8 @@ export function parseStreamAndStore(reqBody, sseText) {
  * DB write happens after the stream ends (message_stop received).
  */
 function forwardStreaming(reqBody, rawBody, req, res) {
+  const startedAt = Date.now();
+  let firstTokenAt = null;
   const options = {
     hostname: ANTHROPIC_HOST,
     port: 443,
@@ -383,6 +391,7 @@ function forwardStreaming(reqBody, rawBody, req, res) {
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
     const sseChunks = [];
     proxyRes.on('data', chunk => {
+      firstTokenAt ??= Date.now();
       res.write(chunk);           // Forward immediately — preserves streaming latency
       sseChunks.push(chunk);      // Buffer for post-stream parsing
     });
@@ -390,7 +399,7 @@ function forwardStreaming(reqBody, rawBody, req, res) {
       res.end();
       if (proxyRes.statusCode === 200) {
         const sseText = Buffer.concat(sseChunks).toString('utf8');
-        try { parseStreamAndStore(reqBody, sseText); }
+        try { parseStreamAndStore(reqBody, sseText, { startedAt, firstTokenAt, endedAt: Date.now() }); }
         catch (err) { console.error('[claude-proxy] SSE parse error:', err.message); }
       }
     });

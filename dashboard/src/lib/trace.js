@@ -61,7 +61,7 @@ export function buildTrace(prompt, toolCalls) {
     if (!groups.has(row.call_order)) groups.set(row.call_order, [])
     groups.get(row.call_order).push(row)
   }
-  const hasTiming = new Set(toolCalls.map((r) => r.timestamp)).size > 1
+  const hasTiming = new Set(toolCalls.map((r) => r.timestamp)).size > 1 || toolCalls.some((r) => r.duration_ms != null)
 
   return [...groups.keys()]
     .sort((a, b) => a - b)

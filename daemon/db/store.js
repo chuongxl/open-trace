@@ -19,10 +19,18 @@ export function getDb() {
   return db;
 }
 
-// Databases created before tool_use_id existed: CREATE TABLE IF NOT EXISTS won't add it.
+// Columns added after first release: CREATE TABLE IF NOT EXISTS won't add them to an existing DB.
+const ADDED_COLUMNS = [
+  ['tool_calls', 'tool_use_id', 'TEXT'],
+  ['prompts', 'first_token_ms', 'INTEGER'],
+  ['prompts', 'request_ms', 'INTEGER'],
+];
+
 function migrate(db) {
-  if (!db.prepare('PRAGMA table_info(tool_calls)').all().some(c => c.name === 'tool_use_id')) {
-    db.exec('ALTER TABLE tool_calls ADD COLUMN tool_use_id TEXT');
+  for (const [table, column, type] of ADDED_COLUMNS) {
+    if (!db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_tool_calls_use_id ON tool_calls(tool_use_id)');
 }
@@ -70,15 +78,16 @@ export function insertPrompt(prompt) {
     INSERT OR IGNORE INTO prompts
       (id, session_id, timestamp, model, input_text,
        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-       equiv_cost_usd, raw_request, raw_response)
+       equiv_cost_usd, first_token_ms, request_ms, raw_request, raw_response)
     VALUES
       (@id, @session_id, @timestamp, @model, @input_text,
        @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens,
-       @equiv_cost_usd, @raw_request, @raw_response)
+       @equiv_cost_usd, @first_token_ms, @request_ms, @raw_request, @raw_response)
   `).run({
     input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
     cache_write_tokens: 0, equiv_cost_usd: 0,
     raw_request: null, raw_response: null, model: null, input_text: null,
+    first_token_ms: null, request_ms: null,
     ...prompt,
   });
 }
@@ -92,9 +101,17 @@ export function insertToolCall(call) {
   `).run({ duration_ms: null, input: null, output: null, tool_use_id: null, ...call });
 }
 
-/** Attach a tool's result once; the first captured output wins. */
-export function setToolCallOutput(toolUseId, output) {
-  getDb().prepare('UPDATE tool_calls SET output = ? WHERE tool_use_id = ? AND output IS NULL').run(output, toolUseId);
+/**
+ * Attach a tool's result once; the first captured output wins. `arrivedAt` (the next request's
+ * start) also fixes the call's duration: tool run time plus any approval wait.
+ */
+export function setToolCallOutput(toolUseId, output, arrivedAt = null) {
+  getDb().prepare(`
+    UPDATE tool_calls
+    SET output = @output,
+        duration_ms = CASE WHEN @arrivedAt IS NULL THEN duration_ms ELSE MAX(0, @arrivedAt - timestamp) END
+    WHERE tool_use_id = @toolUseId AND output IS NULL
+  `).run({ output, arrivedAt, toolUseId });
 }
 
 export function insertOptimization(opt) {
@@ -175,6 +192,7 @@ function getRequests(sessionId) {
   return getDb().prepare(`
     SELECT p.id, p.session_id, p.timestamp, p.model, p.input_text,
            p.input_tokens, p.output_tokens, p.cache_read_tokens, p.cache_write_tokens, p.equiv_cost_usd,
+           p.first_token_ms, p.request_ms,
            (SELECT COUNT(DISTINCT call_order) FROM tool_calls t WHERE t.prompt_id = p.id) AS tool_call_count
     FROM prompts p WHERE p.session_id = ? ORDER BY p.timestamp ASC, p.rowid ASC
   `).all(sessionId);

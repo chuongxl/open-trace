@@ -81,3 +81,11 @@ test('displayName shortens MCP tool names only', () => {
   assert.equal(displayName('mcp__github__search_issues'), 'github/search_issues')
   assert.equal(displayName('Read'), 'Read')
 })
+
+test('buildTrace: a single proxy call with a measured duration shows timing', () => {
+  const steps = buildTrace({ timestamp: 1000 }, [
+    { call_order: 0, call_type: 'tool', name: 'Bash', input: null, output: 'ok', timestamp: 2000, duration_ms: 3500 },
+  ])
+  assert.equal(steps[0].startMs, 1000)
+  assert.equal(steps[0].durationMs, 3500)
+})
