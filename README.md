@@ -38,7 +38,7 @@ Click “Analyze & Optimize” on any prompt — a small LLM runs **entirely in 
 ```bash
 git clone https://github.com/chuongxl/open-trace.git
 cd open-trace
-./setup.sh
+./setup.sh      # Node >= 22; installs deps, builds dashboard, adds env to your shell profile, registers auto-start (launchd/systemd). Safe to re-run.
 ```
 
 Then open the dashboard in your browser at the dashboard port.

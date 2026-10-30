@@ -9,3 +9,4 @@ Local AI usage observatory.
 ## Dev
 - npm run dev (daemon at port 9900)
 - cd dashboard && npm run dev
+See [AGENTS.md](AGENTS.md) for the agent workflow (worktree per issue).
