@@ -116,7 +116,8 @@ function extractUserText(messages) {
   const last = [...messages].reverse().find(m => m.role === 'user');
   if (!last) return null;
   if (typeof last.content === 'string') return last.content.slice(0, 2000);
-  if (Array.isArray(last.content))
+  // A tool-result message is a loop continuation: any text beside it is harness noise, not the user's prompt.
+  if (Array.isArray(last.content) && !last.content.some(b => b.type === 'tool_result'))
     return last.content.filter(b => b.type === 'text').map(b => b.text || '').join(' ').slice(0, 2000);
   return null;
 }

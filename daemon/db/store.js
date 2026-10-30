@@ -148,22 +148,61 @@ export function getSession(id) {
   return getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(id);
 }
 
-// Session-list rows: everything except the (up to 64 KB) raw payloads, plus the call count.
-export function getPrompts(sessionId) {
+// A user turn is a prompt with text plus the tool-loop continuation requests after it
+// (text-less prompts). Grouped at read time so existing data needs no migration.
+// A leading continuation with no turn before it stays its own row.
+function groupTurns(rows) {
+  const turns = [];
+  for (const r of rows) {
+    const turn = turns[turns.length - 1];
+    if (turn && !r.input_text) {
+      turn.input_tokens += r.input_tokens;
+      turn.output_tokens += r.output_tokens;
+      turn.cache_read_tokens += r.cache_read_tokens;
+      turn.cache_write_tokens += r.cache_write_tokens;
+      turn.equiv_cost_usd += r.equiv_cost_usd;
+      turn.tool_call_count += r.tool_call_count;
+      turn.request_count += 1;
+      turn.request_ids.push(r.id);
+    } else {
+      turns.push({ ...r, request_count: 1, request_ids: [r.id] });
+    }
+  }
+  return turns;
+}
+
+function getRequests(sessionId) {
   return getDb().prepare(`
     SELECT p.id, p.session_id, p.timestamp, p.model, p.input_text,
            p.input_tokens, p.output_tokens, p.cache_read_tokens, p.cache_write_tokens, p.equiv_cost_usd,
            (SELECT COUNT(DISTINCT call_order) FROM tool_calls t WHERE t.prompt_id = p.id) AS tool_call_count
-    FROM prompts p WHERE p.session_id = ? ORDER BY p.timestamp ASC
+    FROM prompts p WHERE p.session_id = ? ORDER BY p.timestamp ASC, p.rowid ASC
   `).all(sessionId);
 }
 
+// Session-list rows: one per user turn, without the (up to 64 KB) raw payloads.
+export function getPrompts(sessionId) {
+  return groupTurns(getRequests(sessionId)).map(({ request_ids, ...turn }) => turn);
+}
+
+/** The turn containing prompt `id` (any of its requests), with its raw payloads and tool calls in request order. */
 export function getPrompt(id) {
-  return getDb().prepare('SELECT * FROM prompts WHERE id = ?').get(id);
+  const prompt = getDb().prepare('SELECT * FROM prompts WHERE id = ?').get(id);
+  if (!prompt) return prompt;
+  const turn = groupTurns(getRequests(prompt.session_id)).find((t) => t.request_ids.includes(id));
+  const head = getDb().prepare('SELECT * FROM prompts WHERE id = ?').get(turn.request_ids[0]);
+  return { ...head, ...turn };
 }
 
 export function getToolCalls(promptId) {
-  return getDb().prepare('SELECT * FROM tool_calls WHERE prompt_id = ? ORDER BY call_order ASC, timestamp ASC').all(promptId);
+  const turn = getPrompt(promptId);
+  const get = getDb().prepare('SELECT * FROM tool_calls WHERE prompt_id = ? ORDER BY call_order ASC, timestamp ASC');
+  let next = 0; // each request numbers its calls from 0; continue the count across the turn
+  return turn.request_ids.flatMap((rid) => {
+    const rows = get.all(rid).map((c) => ({ ...c, call_order: c.call_order + next }));
+    if (rows.length) next = Math.max(...rows.map((c) => c.call_order)) + 1;
+    return rows;
+  });
 }
 
 export function getOptimization(promptId) {
