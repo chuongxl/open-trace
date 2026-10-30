@@ -127,3 +127,17 @@ test('a client that disconnects while held is never forwarded', async () => {
   await new Promise(r => setTimeout(r, 200));
   assert.equal(seen.length, before, 'held request dropped, not forwarded');
 });
+
+test('turn_started is emitted with the same requestId the hook saw, before the response', async () => {
+  const { subscribe } = await import('../daemon/events.js');
+  const events = [];
+  const off = subscribe((e) => events.push(e));
+  let hookId;
+  proxy.setRequestHook(async ({ requestId }) => { hookId = requestId; });
+  await send(ODD);
+  off();
+  const started = events.find(e => e.type === 'turn_started');
+  assert.equal(started.data.request_id, hookId);
+  assert.ok(started.data.session_id);
+  assert.ok(events.findIndex(e => e.type === 'turn_started') < events.findIndex(e => e.type === 'turn_finished'));
+});

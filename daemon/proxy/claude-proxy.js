@@ -22,6 +22,8 @@ import { randomUUID } from 'crypto';
 import { config } from '../config.js';
 import { upsertSession, insertPrompt, insertToolCall, setToolCallOutput } from '../db/store.js';
 import { estimateCost } from '../pricing/models.js';
+import { analyzeContext } from '../context.js';
+import { emit } from '../events.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const SESSION_TIMEOUT_MS  = 30 * 60 * 1000; // 30-min inactivity window
@@ -214,6 +216,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp, timing = {}
       cache_read_tokens:  usage.cache_read_tokens  || 0,
       cache_write_tokens: usage.cache_write_tokens || 0,
       equiv_cost_usd:     cost,
+      context:            JSON.stringify(analyzeContext(reqBody)),
       first_token_ms:     timing.startedAt != null && timing.firstTokenAt != null ? timing.firstTokenAt - timing.startedAt : null,
       request_ms:         timing.startedAt != null ? endedAt - timing.startedAt : null,
       raw_request:        rawReq,
@@ -232,6 +235,11 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp, timing = {}
         output:     null,
         timestamp:  endedAt, // duration is set when the result arrives
       });
+    });
+    emit('turn_finished', {
+      session_id: sessionId, prompt_id: promptId, model, ended_at: endedAt,
+      input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0,
+      equiv_cost_usd: cost, tools: toolUses.map(t => t.name),
     });
     console.log('[claude-proxy] stored: model='+model+' in='+(usage.input_tokens||0)+' out='+(usage.output_tokens||0)+' tools='+toolUses.length+' sid='+sessionId.slice(0,8));
   } catch (err) {
@@ -456,12 +464,13 @@ function handleRequest(req, res) {
     try { reqBody = JSON.parse(rawBody.toString('utf8')); }
     catch { parsed = false; /* non-JSON body: forward as-is via non-streaming path */ }
 
+    const requestId = randomUUID();
     let headers = req.headers;
     if (requestHook && parsed) {
       const ctrl = new AbortController();
       res.on('close', () => { if (!res.writableEnded) ctrl.abort(); });
       try {
-        const out = await requestHook({ requestId: randomUUID(), body: reqBody, headers: req.headers, signal: ctrl.signal });
+        const out = await requestHook({ requestId, body: reqBody, headers: req.headers, signal: ctrl.signal });
         if (ctrl.signal.aborted) return; // client left while held: nothing to forward
         if (out?.body) {
           reqBody = out.body;
@@ -473,6 +482,11 @@ function handleRequest(req, res) {
         console.error('[claude-proxy] request hook failed, forwarding unchanged:', err.message);
         if (ctrl.signal.aborted) return;
       }
+    }
+
+    if (parsed) {
+      try { emit('turn_started', { session_id: resolveSession(reqBody).sessionId, request_id: requestId, model: reqBody.model ?? null, started_at: Date.now() }); }
+      catch (err) { console.error('[claude-proxy] turn_started failed:', err.message); }
     }
 
     if (reqBody.stream === true) {

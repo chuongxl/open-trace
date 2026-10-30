@@ -64,3 +64,18 @@ export function postOptimization(body) {
 export function getOptimization(promptId) {
   return request(`/optimizations/${encodeURIComponent(promptId)}`)
 }
+
+export function getSessionContext(id) {
+  return request(`/sessions/${encodeURIComponent(id)}/context`)
+}
+
+/** Subscribe to the daemon's live event stream; returns an unsubscribe function. */
+export function subscribeLive(onEvent, onStatus = () => {}) {
+  const source = new EventSource(`${BASE}/live`)
+  for (const type of ['turn_started', 'turn_finished', 'session_updated']) {
+    source.addEventListener(type, (e) => onEvent({ type, data: JSON.parse(e.data) }))
+  }
+  source.onopen = () => onStatus(true)
+  source.onerror = () => onStatus(false)
+  return () => source.close()
+}

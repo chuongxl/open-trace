@@ -5,6 +5,7 @@ import Overview from './pages/Overview.jsx'
 import Projects from './pages/Projects.jsx'
 import ProjectDetail from './pages/ProjectDetail.jsx'
 import SessionDetail from './pages/SessionDetail.jsx'
+import SessionContext from './pages/SessionContext.jsx'
 import PromptDetail from './pages/PromptDetail.jsx'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:path" element={<ProjectDetail />} />
               <Route path="/sessions/:id" element={<SessionDetail />} />
+              <Route path="/sessions/:id/context" element={<SessionContext />} />
               <Route path="/prompts/:id" element={<PromptDetail />} />
             </Routes>
           </DaemonGate>

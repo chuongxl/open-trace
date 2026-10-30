@@ -41,6 +41,11 @@ export default function SessionDetail() {
         <h1 className="text-xl font-semibold">{session.project_name || 'Session'}</h1>
         <ToolBadge tool={session.tool} />
         <CostBadge cost={session.equiv_cost_usd ?? 0} />
+        {session.tool === 'claude-code' && (
+          <Link to={`/sessions/${encodeURIComponent(id)}/context`} className="ml-auto text-sm text-sky-400 hover:underline">
+            Context inspector
+          </Link>
+        )}
       </div>
       <div className="mt-1 text-xs text-neutral-400">
         {session.model} · started {new Date(session.started_at).toLocaleString()} ·{' '}

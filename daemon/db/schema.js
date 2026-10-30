@@ -27,6 +27,7 @@ export const SCHEMA = `
     equiv_cost_usd     REAL DEFAULT 0,
     first_token_ms     INTEGER,
     request_ms         INTEGER,
+    context            TEXT,
     raw_request        TEXT,
     raw_response       TEXT
   );
