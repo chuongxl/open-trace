@@ -20,7 +20,7 @@ import https from 'https';
 import { basename } from 'path';
 import { randomUUID } from 'crypto';
 import { config } from '../config.js';
-import { upsertSession, insertPrompt, insertToolCall } from '../db/store.js';
+import { upsertSession, insertPrompt, insertToolCall, setToolCallOutput } from '../db/store.js';
 import { estimateCost } from '../pricing/models.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -135,6 +135,22 @@ function capJson(obj, maxBytes) {
   }
 }
 
+/**
+ * Tool results for turn N's tool_use blocks arrive as tool_result blocks in the
+ * last user message of turn N+1's request. Attach each to its stored call.
+ */
+function captureToolResults(messages) {
+  const last = Array.isArray(messages) ? messages[messages.length - 1] : null;
+  if (last?.role !== 'user' || !Array.isArray(last.content)) return;
+  for (const b of last.content) {
+    if (b.type !== 'tool_result' || !b.tool_use_id) continue;
+    const text = typeof b.content === 'string' ? b.content
+      : Array.isArray(b.content) ? b.content.map(c => c.type === 'text' ? c.text : '[' + c.type + ']').join('\n')
+      : '';
+    setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text);
+  }
+}
+
 // ─── DB write ─────────────────────────────────────────────────────────────────
 
 /**
@@ -142,7 +158,7 @@ function capJson(obj, maxBytes) {
  * @param {object} reqBody   - Parsed request JSON from Claude Code
  * @param {object} usage     - Token counts: {input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}
  * @param {string} model     - Model identifier string
- * @param {Array}  toolUses  - Array of {name, input} objects from tool_use blocks
+ * @param {Array}  toolUses  - Array of {id, name, input} objects from tool_use blocks
  * @param {string} rawReq    - Capped raw request JSON for storage
  * @param {string} rawResp   - Capped raw response text for storage
  */
@@ -150,6 +166,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
   try {
     const { sessionId, projectPath, projectName } = resolveSession(reqBody);
     const cost = estimateCost(model, usage);
+    captureToolResults(reqBody.messages);
 
     upsertSession({
       id:                  sessionId,
@@ -186,6 +203,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp) {
         id:         randomUUID(),
         prompt_id:  promptId,
         call_order: i,
+        tool_use_id: tool.id ?? null,
         call_type:  'tool',
         name:       tool.name,
         input:      capJson(tool.input, MAX_TOOL_BYTES),
@@ -327,13 +345,13 @@ export function parseStreamAndStore(reqBody, sseText) {
 
   // Assemble tool_use objects with reconstructed input JSON
   const toolUses = [];
-  for (const [, tool] of toolMap) {
+  for (const [id, tool] of toolMap) {
     const joined = tool.inputChunks.join('');
     let input = null;
     if (joined) {
       try { input = JSON.parse(joined); } catch { input = joined; /* store as raw string */ }
     }
-    toolUses.push({ name: tool.name, input });
+    toolUses.push({ id, name: tool.name, input });
   }
 
   const usage = {
