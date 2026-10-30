@@ -77,6 +77,16 @@ cd daemon && node --watch index.js
 cd dashboard && npm run dev
 ```
 
+## Local API security
+
+The daemon binds to `127.0.0.1`, but browsers can still reach it, so the API is guarded (`daemon/security.js`):
+
+- `Host` must be `localhost`, `127.0.0.1` or `[::1]` on the daemon port (blocks DNS rebinding).
+- A browser `Origin` must be the dashboard itself or the Vite dev server (`localhost:5173`); anything else gets 403 and no CORS grant. Add more with `OPEN_TRACE_ALLOWED_ORIGINS=https://a,https://b`.
+- Non-GET requests need `Authorization: Bearer <token>`. The token is generated on first start at `~/.open-trace/token` (mode 0600, next to the DB); the dashboard fetches it from `GET /api/token`, which only allowed origins can read. Local scripts can read the file.
+
+Not covered: other local processes running as you can read the token file, and the proxy ports (9876/9877) are unauthenticated by design (the client talks to them directly).
+
 ## Known Limitations
 
 - Copilot inline completions: estimated as `chars/4` (shown with `~` prefix)

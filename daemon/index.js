@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { config } from './config.js';
+import { guard, loadToken, DEV_ORIGINS } from './security.js';
 import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
 import { createClaudeProxy } from './proxy/claude-proxy.js';
@@ -16,10 +17,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 getDb();
 
 const app = express();
-app.use(cors());
+const token = loadToken(join(dirname(config.dbPath), 'token'));
+const extraOrigins = (process.env.OPEN_TRACE_ALLOWED_ORIGINS ?? '').split(',').filter(Boolean);
 app.use(express.json({ limit: '10mb' }));
 
-// API routes
+// API routes: guarded, CORS only for the dashboard and configured dev origins
+app.use('/api', guard({ token, extraOrigins }), cors({ origin: [...DEV_ORIGINS, ...extraOrigins] }));
+// The dashboard (same-origin or an allowed dev origin) fetches the token here; foreign pages are rejected by the guard.
+app.get('/api/token', (_req, res) => res.json({ token }));
 app.use('/api', apiRouter);
 
 // Serve built dashboard if present (express.static is bundled with express)
