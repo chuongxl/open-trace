@@ -48,6 +48,11 @@ router.get('/live', (req, res) => {
   req.on('close', () => { unsubscribe(); clearInterval(heartbeat); });
 });
 
+router.get('/sessions/:id/alerts', (req, res) => {
+  if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });
+  res.json({ alerts: store.getAlerts(req.params.id) });
+});
+
 // Per-request context size by section (chars; the UI shows ~chars/4 tokens) and the diff vs the previous request.
 router.get('/sessions/:id/context', (req, res) => {
   if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });

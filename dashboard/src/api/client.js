@@ -65,6 +65,10 @@ export function getOptimization(promptId) {
   return request(`/optimizations/${encodeURIComponent(promptId)}`)
 }
 
+export function getSessionAlerts(id) {
+  return request(`/sessions/${encodeURIComponent(id)}/alerts`)
+}
+
 export function getSessionContext(id) {
   return request(`/sessions/${encodeURIComponent(id)}/context`)
 }
@@ -72,7 +76,7 @@ export function getSessionContext(id) {
 /** Subscribe to the daemon's live event stream; returns an unsubscribe function. */
 export function subscribeLive(onEvent, onStatus = () => {}) {
   const source = new EventSource(`${BASE}/live`)
-  for (const type of ['turn_started', 'turn_finished', 'session_updated']) {
+  for (const type of ['turn_started', 'turn_finished', 'session_updated', 'alert']) {
     source.addEventListener(type, (e) => onEvent({ type, data: JSON.parse(e.data) }))
   }
   source.onopen = () => onStatus(true)

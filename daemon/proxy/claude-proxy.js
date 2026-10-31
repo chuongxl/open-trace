@@ -166,7 +166,7 @@ function captureToolResults(messages, arrivedAt) {
     const text = typeof b.content === 'string' ? b.content
       : Array.isArray(b.content) ? b.content.map(c => c.type === 'text' ? c.text : '[' + c.type + ']').join('\n')
       : '';
-    setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text, arrivedAt);
+    setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text, arrivedAt, b.is_error === true);
   }
 }
 
@@ -239,6 +239,7 @@ function writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp, timing = {}
     emit('turn_finished', {
       session_id: sessionId, prompt_id: promptId, model, ended_at: endedAt,
       input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0,
+      cache_read_tokens: usage.cache_read_tokens || 0, cache_write_tokens: usage.cache_write_tokens || 0,
       equiv_cost_usd: cost, tools: toolUses.map(t => t.name),
     });
     console.log('[claude-proxy] stored: model='+model+' in='+(usage.input_tokens||0)+' out='+(usage.output_tokens||0)+' tools='+toolUses.length+' sid='+sessionId.slice(0,8));

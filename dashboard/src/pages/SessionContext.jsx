@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getSession, getSessionContext, subscribeLive } from '../api/client.js'
+import { TriangleAlert } from 'lucide-react'
+import { getSession, getSessionAlerts, getSessionContext, subscribeLive } from '../api/client.js'
 import Breadcrumb from '../components/Breadcrumb.jsx'
 import LoadingSkeleton from '../components/LoadingSkeleton.jsx'
 import { SECTIONS, barSegments, describeDelta, estTokens } from '../lib/context.js'
@@ -15,8 +16,8 @@ export default function SessionContext() {
     let cancelled = false
     let timer
     const load = () =>
-      Promise.all([getSession(id), getSessionContext(id)])
-        .then(([session, ctx]) => !cancelled && setState({ id, session, turns: ctx.turns }))
+      Promise.all([getSession(id), getSessionContext(id), getSessionAlerts(id)])
+        .then(([session, ctx, a]) => !cancelled && setState({ id, session, turns: ctx.turns, alerts: a.alerts }))
         .catch((error) => !cancelled && setState({ id, error }))
     load()
     // Refetch (debounced) whenever this session finishes a turn.
@@ -38,7 +39,7 @@ export default function SessionContext() {
   if (state.id !== id) return <LoadingSkeleton />
   if (state.error) return <p className="text-sm text-red-400">{state.error.message}</p>
 
-  const { session, turns } = state
+  const { session, turns, alerts } = state
   const maxTotal = Math.max(0, ...turns.map((t) => t.total_chars))
   const crumbs = [{ label: 'Projects', to: '/projects' }]
   if (session.project_path) {
@@ -60,6 +61,18 @@ export default function SessionContext() {
         What the model is sent on every request. Sizes are estimates (~chars/4), split by a heuristic: CLAUDE.md is detected from
         Claude Code’s injected reminder.
       </p>
+
+      {alerts.length > 0 && (
+        <ul className="mt-3 space-y-1" aria-label="alerts">
+          {alerts.map((a) => (
+            <li key={a.id} className="flex items-start gap-2 rounded border border-amber-800/60 bg-amber-950/40 px-3 py-1.5 text-sm text-amber-200">
+              <TriangleAlert size={14} className="mt-0.5 shrink-0" />
+              <span>{a.message}</span>
+              <span className="ml-auto shrink-0 text-xs text-amber-400/70">{new Date(a.created_at).toLocaleTimeString()}</span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="mt-3 flex flex-wrap gap-3 text-xs text-neutral-300">
         {SECTIONS.map((s) => (
