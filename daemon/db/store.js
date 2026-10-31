@@ -26,6 +26,7 @@ const ADDED_COLUMNS = [
   ['prompts', 'first_token_ms', 'INTEGER'],
   ['prompts', 'request_ms', 'INTEGER'],
   ['prompts', 'context', 'TEXT'],
+  ['tool_calls', 'is_error', 'INTEGER'],
 ];
 
 function migrate(db) {
@@ -108,13 +109,36 @@ export function insertToolCall(call) {
  * Attach a tool's result once; the first captured output wins. `arrivedAt` (the next request's
  * start) also fixes the call's duration: tool run time plus any approval wait.
  */
-export function setToolCallOutput(toolUseId, output, arrivedAt = null) {
+export function setToolCallOutput(toolUseId, output, arrivedAt = null, isError = false) {
   getDb().prepare(`
     UPDATE tool_calls
-    SET output = @output,
+    SET output = @output, is_error = @isError,
         duration_ms = CASE WHEN @arrivedAt IS NULL THEN duration_ms ELSE MAX(0, @arrivedAt - timestamp) END
     WHERE tool_use_id = @toolUseId AND output IS NULL
-  `).run({ output, arrivedAt, toolUseId });
+  `).run({ output, arrivedAt, toolUseId, isError: isError ? 1 : 0 });
+}
+
+/** Store an alert once per (session, dedupe_key). Returns the row, or null if it already existed. */
+export function insertAlert({ session_id, kind, dedupe_key, message }) {
+  const created_at = Date.now();
+  const r = getDb().prepare(
+    'INSERT OR IGNORE INTO alerts (session_id, kind, dedupe_key, message, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(session_id, kind, dedupe_key, message, created_at);
+  return r.changes ? { id: Number(r.lastInsertRowid), session_id, kind, message, created_at } : null;
+}
+
+export function getAlerts(sessionId) {
+  return getDb().prepare('SELECT id, session_id, kind, message, created_at FROM alerts WHERE session_id = ? ORDER BY created_at ASC, id ASC').all(sessionId);
+}
+
+/** Most recent tool calls of a session, newest first (request order, then call order). */
+export function getRecentToolCalls(sessionId, limit = 30) {
+  return getDb().prepare(`
+    SELECT t.id, t.name, t.input, t.output, t.is_error
+    FROM tool_calls t JOIN prompts p ON p.id = t.prompt_id
+    WHERE p.session_id = ?
+    ORDER BY p.timestamp DESC, p.rowid DESC, t.call_order DESC LIMIT ?
+  `).all(sessionId, limit);
 }
 
 export function insertOptimization(opt) {
