@@ -4,6 +4,8 @@ import { join } from 'path';
 import { homedir } from 'os';
 import * as store from '../db/store.js';
 import { config } from '../config.js';
+import { subscribe } from '../events.js';
+import { diffContext } from '../context.js';
 
 const router = Router();
 
@@ -34,6 +36,35 @@ router.get('/sessions/:id', (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found' });
   const prompts = store.getPrompts(req.params.id);
   res.json({ ...session, prompts });
+});
+
+// ─── Live feed + context ──────────────────────────────────────────────────────
+// Server-Sent Events: turn_started, turn_finished, session_updated (see daemon/events.js).
+router.get('/live', (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.write('retry: 3000\n\n');
+  const unsubscribe = subscribe((e) => res.write(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`));
+  const heartbeat = setInterval(() => res.write(': keep-alive\n\n'), 25000);
+  req.on('close', () => { unsubscribe(); clearInterval(heartbeat); });
+});
+
+// Per-request context size by section (chars; the UI shows ~chars/4 tokens) and the diff vs the previous request.
+router.get('/sessions/:id/context', (req, res) => {
+  if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });
+  let prev = null;
+  const turns = store.getContextRows(req.params.id).map((row) => {
+    const ctx = JSON.parse(row.context);
+    const turn = {
+      prompt_id: row.id, timestamp: row.timestamp, input_text: row.input_text,
+      input_tokens: row.input_tokens, output_tokens: row.output_tokens, cache_read_tokens: row.cache_read_tokens,
+      sections: ctx.sections, message_count: ctx.message_count,
+      total_chars: Object.values(ctx.sections).reduce((a, b) => a + b, 0),
+      diff: diffContext(prev, ctx),
+    };
+    prev = ctx;
+    return turn;
+  });
+  res.json({ turns });
 });
 
 // ─── Memory ───────────────────────────────────────────────────────────────────

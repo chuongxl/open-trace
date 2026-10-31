@@ -3,6 +3,7 @@ import { mkdirSync, existsSync } from 'fs';
 import { dirname } from 'path';
 import { config } from '../config.js';
 import { SCHEMA } from './schema.js';
+import { emit } from '../events.js';
 
 let db;
 
@@ -24,6 +25,7 @@ const ADDED_COLUMNS = [
   ['tool_calls', 'tool_use_id', 'TEXT'],
   ['prompts', 'first_token_ms', 'INTEGER'],
   ['prompts', 'request_ms', 'INTEGER'],
+  ['prompts', 'context', 'TEXT'],
 ];
 
 function migrate(db) {
@@ -72,22 +74,23 @@ export function upsertSession(session) {
     total_cache_read: 0, total_cache_write: 0, equiv_cost_usd: 0,
     project_name: null, model: null, ...params,
   });
+  emit('session_updated', { session_id: session.id });
 }
 export function insertPrompt(prompt) {
   getDb().prepare(`
     INSERT OR IGNORE INTO prompts
       (id, session_id, timestamp, model, input_text,
        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-       equiv_cost_usd, first_token_ms, request_ms, raw_request, raw_response)
+       equiv_cost_usd, first_token_ms, request_ms, context, raw_request, raw_response)
     VALUES
       (@id, @session_id, @timestamp, @model, @input_text,
        @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens,
-       @equiv_cost_usd, @first_token_ms, @request_ms, @raw_request, @raw_response)
+       @equiv_cost_usd, @first_token_ms, @request_ms, @context, @raw_request, @raw_response)
   `).run({
     input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
     cache_write_tokens: 0, equiv_cost_usd: 0,
     raw_request: null, raw_response: null, model: null, input_text: null,
-    first_token_ms: null, request_ms: null,
+    first_token_ms: null, request_ms: null, context: null,
     ...prompt,
   });
 }
@@ -204,6 +207,14 @@ export function getPrompts(sessionId) {
 }
 
 /** The turn containing prompt `id` (any of its requests), with its raw payloads and tool calls in request order. */
+/** Per-request context summaries of a session, oldest first. Rows stored before #56 have none. */
+export function getContextRows(sessionId) {
+  return getDb().prepare(`
+    SELECT id, timestamp, input_text, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, context
+    FROM prompts WHERE session_id = ? AND context IS NOT NULL ORDER BY timestamp ASC, rowid ASC
+  `).all(sessionId);
+}
+
 export function getPrompt(id) {
   const prompt = getDb().prepare('SELECT * FROM prompts WHERE id = ?').get(id);
   if (!prompt) return prompt;
