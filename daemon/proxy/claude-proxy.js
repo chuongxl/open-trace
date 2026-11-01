@@ -24,6 +24,7 @@ import { upsertSession, insertPrompt, insertToolCall, setToolCallOutput } from '
 import { estimateCost } from '../pricing/models.js';
 import { analyzeContext } from '../context.js';
 import { emit } from '../events.js';
+import { syntheticEndTurn } from './synthetic.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const SESSION_TIMEOUT_MS  = 30 * 60 * 1000; // 30-min inactivity window
@@ -41,8 +42,9 @@ const upstreamRequest = (options, cb) =>
 
 /**
  * Optional async hook run after the request body is buffered and before it is forwarded.
- * Called with { requestId, body (parsed JSON), headers, signal (aborts if the client disconnects) }.
- * It may hold the request by not resolving yet, and may resolve { body } to replace the request.
+ * Called with { requestId, sessionId, body (parsed JSON), headers, signal (aborts if the client disconnects) }.
+ * It may hold the request by not resolving yet, resolve { body } to replace the request, or resolve
+ * { respond: { text } } to answer with a synthetic end_turn reply and never call upstream.
  * No hook = byte-identical pass-through.
  */
 let requestHook = null;
@@ -466,13 +468,25 @@ function handleRequest(req, res) {
     catch { parsed = false; /* non-JSON body: forward as-is via non-streaming path */ }
 
     const requestId = randomUUID();
+    let sessionId = null;
+    if (parsed) {
+      try { sessionId = resolveSession(reqBody).sessionId; }
+      catch (err) { console.error('[claude-proxy] session lookup failed:', err.message); }
+    }
     let headers = req.headers;
     if (requestHook && parsed) {
       const ctrl = new AbortController();
       res.on('close', () => { if (!res.writableEnded) ctrl.abort(); });
       try {
-        const out = await requestHook({ requestId, body: reqBody, headers: req.headers, signal: ctrl.signal });
+        const out = await requestHook({ requestId, sessionId, body: reqBody, headers: req.headers, signal: ctrl.signal });
         if (ctrl.signal.aborted) return; // client left while held: nothing to forward
+        if (out?.respond) {
+          const reply = syntheticEndTurn({ model: reqBody.model, stream: reqBody.stream === true, text: out.respond.text });
+          res.writeHead(200, reply.headers);
+          res.end(reply.body);
+          emit('turn_stopped', { session_id: sessionId, request_id: requestId });
+          return;
+        }
         if (out?.body) {
           reqBody = out.body;
           rawBody = Buffer.from(JSON.stringify(reqBody), 'utf8');
@@ -485,10 +499,7 @@ function handleRequest(req, res) {
       }
     }
 
-    if (parsed) {
-      try { emit('turn_started', { session_id: resolveSession(reqBody).sessionId, request_id: requestId, model: reqBody.model ?? null, started_at: Date.now() }); }
-      catch (err) { console.error('[claude-proxy] turn_started failed:', err.message); }
-    }
+    if (sessionId) emit('turn_started', { session_id: sessionId, request_id: requestId, model: reqBody.model ?? null, started_at: Date.now() });
 
     if (reqBody.stream === true) {
       forwardStreaming(reqBody, rawBody, req, res, headers);

@@ -56,6 +56,15 @@ until they can be pointed at the proxy via a base-URL setting.
 - UI: session header with state badge and Pause / Step / Continue / Stop; desktop notification on auto-pause.
 - The setup path exports a raised `API_TIMEOUT_MS` so a held request does not time out the client (README references `./setup.sh`, which is not in the repo yet; see #14).
 
+**Implemented (#58).** `daemon/debugger.js` is the proxy's request hook. Per-session mode in memory: `running | pausing | paused | stopping`.
+- `POST /api/sessions/:id/{pause,step,continue,stop}` (token required, #62), `GET /api/sessions/:id/debug`, `POST /api/sessions/:id/break-on-alert {enabled}`. `step` with nothing held is 409.
+- **Pause** takes effect at the next request; the in-flight response is never cut. **Step** releases the oldest held request and re-holds the next. **Continue** releases all and stops holding (also cancels an armed stop). **Stop** answers held requests with a synthetic `end_turn` ("Stopped by open-trace.", `daemon/proxy/synthetic.js`, JSON and SSE shapes, no upstream call). With nothing held, stop is *armed* for 60 s and applies only to the next tool-loop continuation (last user message is a `tool_result`), never to a fresh prompt the engineer types.
+- Only requests that carry `tools` are held; Claude Code's small background calls (titles, summaries) pass through.
+- A client that disconnects while held is dropped. Events: `debug_state` (with a `reason`) and `turn_stopped` on `/api/live`.
+- **Break on alert:** a per-session opt-in; a detector alert (#57) switches the session to pause mode. The dashboard asks for desktop-notification permission when it is enabled and notifies on that auto-pause.
+- UI: `DebugControls` (state badge, four buttons enabled per state, break-on-alert checkbox) on the session page and the context inspector page, Claude Code sessions only.
+- A held request keeps the client waiting, so `setup.sh` exports `API_TIMEOUT_MS=600000` (#14). Not done: keep-alive bytes to a held streaming client; persisted debugger state or audit trail (state resets on daemon restart; the audit trail is Phase 15).
+
 ### Phase 15 — Inject and edit context
 - **Overlay**: an ordered list of rules stored per session and reapplied to every request, because the client resends its own history each turn. Rule kinds: `append_user_message`, `replace_message`, `truncate_tool_result`, `delete_message`.
 - **Validator** before apply: every `tool_use` keeps its `tool_result`; signed thinking blocks are never edited; result must still parse as a valid Messages request.

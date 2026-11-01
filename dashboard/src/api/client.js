@@ -76,10 +76,27 @@ export function getSessionContext(id) {
 /** Subscribe to the daemon's live event stream; returns an unsubscribe function. */
 export function subscribeLive(onEvent, onStatus = () => {}) {
   const source = new EventSource(`${BASE}/live`)
-  for (const type of ['turn_started', 'turn_finished', 'session_updated', 'alert']) {
+  for (const type of ['turn_started', 'turn_finished', 'session_updated', 'alert', 'debug_state', 'turn_stopped']) {
     source.addEventListener(type, (e) => onEvent({ type, data: JSON.parse(e.data) }))
   }
   source.onopen = () => onStatus(true)
   source.onerror = () => onStatus(false)
   return () => source.close()
+}
+
+export function getDebugState(id) {
+  return request(`/sessions/${encodeURIComponent(id)}/debug`)
+}
+
+/** action: pause | step | continue | stop */
+export function debugAction(id, action) {
+  return request(`/sessions/${encodeURIComponent(id)}/${action}`, { method: 'POST' })
+}
+
+export function setBreakOnAlert(id, enabled) {
+  return request(`/sessions/${encodeURIComponent(id)}/break-on-alert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
 }

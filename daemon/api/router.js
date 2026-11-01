@@ -6,6 +6,7 @@ import * as store from '../db/store.js';
 import { config } from '../config.js';
 import { subscribe } from '../events.js';
 import { diffContext } from '../context.js';
+import * as debug from '../debugger.js';
 
 const router = Router();
 
@@ -51,6 +52,26 @@ router.get('/live', (req, res) => {
 router.get('/sessions/:id/alerts', (req, res) => {
   if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });
   res.json({ alerts: store.getAlerts(req.params.id) });
+});
+
+// ─── Session debugger (Phase 14) ──────────────────────────────────────────────
+router.get('/sessions/:id/debug', (req, res) => {
+  if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });
+  res.json(debug.describe(req.params.id));
+});
+
+for (const [action, fn] of Object.entries({ pause: debug.pause, step: debug.step, continue: debug.resume, stop: debug.stop })) {
+  router.post(`/sessions/:id/${action}`, (req, res) => {
+    if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });
+    const out = fn(req.params.id);
+    if (out.error) return res.status(409).json({ error: out.error });
+    res.json(out);
+  });
+}
+
+router.post('/sessions/:id/break-on-alert', (req, res) => {
+  if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });
+  res.json(debug.setBreakOnAlert(req.params.id, req.body?.enabled === true));
 });
 
 // Per-request context size by section (chars; the UI shows ~chars/4 tokens) and the diff vs the previous request.
