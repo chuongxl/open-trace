@@ -141,6 +141,38 @@ export function getRecentToolCalls(sessionId, limit = 30) {
   `).all(sessionId, limit);
 }
 
+// ─── Context overlay (Phase 15) ───────────────────────────────────────────────
+
+export function addOverlayRule(sessionId, kind, params) {
+  const created_at = Date.now();
+  const r = getDb().prepare('INSERT INTO overlay_rules (session_id, kind, params, created_at) VALUES (?, ?, ?, ?)')
+    .run(sessionId, kind, JSON.stringify(params), created_at);
+  return { id: Number(r.lastInsertRowid), session_id: sessionId, kind, params, anchor: null, created_at };
+}
+
+export function getOverlayRules(sessionId) {
+  return getDb().prepare('SELECT * FROM overlay_rules WHERE session_id = ? ORDER BY id ASC').all(sessionId)
+    .map((r) => ({ ...r, params: JSON.parse(r.params) }));
+}
+
+export function removeOverlayRule(sessionId, id) {
+  return getDb().prepare('DELETE FROM overlay_rules WHERE session_id = ? AND id = ?').run(sessionId, id).changes > 0;
+}
+
+/** First application fixes where an injection sits in the history; it never moves afterwards. */
+export function setOverlayAnchor(id, anchor) {
+  getDb().prepare('UPDATE overlay_rules SET anchor = ? WHERE id = ? AND anchor IS NULL').run(anchor, id);
+}
+
+export function addOverlayAudit({ session_id = null, request_id = null, rule_id = null, action, detail = null }) {
+  getDb().prepare('INSERT INTO overlay_audit (session_id, request_id, rule_id, action, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(session_id, request_id, rule_id, action, detail, Date.now());
+}
+
+export function getOverlayAudit(sessionId, limit = 200) {
+  return getDb().prepare('SELECT * FROM (SELECT * FROM overlay_audit WHERE session_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC').all(sessionId, limit);
+}
+
 export function insertOptimization(opt) {
   getDb().prepare(`
     INSERT OR REPLACE INTO optimizations

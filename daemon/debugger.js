@@ -61,7 +61,7 @@ export async function debugHook({ requestId, sessionId, body, signal }) {
   if (s.mode !== 'pause') return undefined;
 
   return new Promise((resolve) => {
-    s.held.set(requestId, { requestId, model: body.model ?? null, heldAt: Date.now(), messageCount: body.messages?.length ?? 0, continuation: isContinuation(body), resolve });
+    s.held.set(requestId, { requestId, model: body.model ?? null, heldAt: Date.now(), messageCount: body.messages?.length ?? 0, continuation: isContinuation(body), body, resolve });
     publish(sessionId, 'held');
     signal.addEventListener('abort', () => {
       if (s.held.delete(requestId)) publish(sessionId, 'client_left');
@@ -74,6 +74,11 @@ const release = (s, requestId, outcome) => {
   s.held.delete(requestId);
   entry.resolve(outcome);
 };
+
+/** The request body of the oldest held request, for previewing an overlay edit against it. */
+export function heldBody(sessionId) {
+  return get(sessionId).held.values().next().value?.body ?? null;
+}
 
 export function pause(sessionId) {
   const s = get(sessionId);

@@ -4,6 +4,7 @@ import { TriangleAlert } from 'lucide-react'
 import { getSession, getSessionAlerts, getSessionContext, subscribeLive } from '../api/client.js'
 import Breadcrumb from '../components/Breadcrumb.jsx'
 import DebugControls from '../components/DebugControls.jsx'
+import OverlayPanel from '../components/OverlayPanel.jsx'
 import LoadingSkeleton from '../components/LoadingSkeleton.jsx'
 import { SECTIONS, barSegments, describeDelta, estTokens } from '../lib/context.js'
 import { formatTokenCount, shortenHomePath } from '../lib/format.js'
@@ -59,6 +60,7 @@ export default function SessionContext() {
         </span>
       </div>
       <DebugControls sessionId={id} />
+      <OverlayPanel sessionId={id} />
       <p className="mt-3 text-xs text-neutral-400">
         What the model is sent on every request. Sizes are estimates (~chars/4), split by a heuristic: CLAUDE.md is detected from
         Claude Code’s injected reminder.

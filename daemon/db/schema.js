@@ -67,6 +67,27 @@ export const SCHEMA = `
     UNIQUE (session_id, dedupe_key)
   );
 
+  CREATE TABLE IF NOT EXISTS overlay_rules (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    kind       TEXT NOT NULL,
+    params     TEXT NOT NULL,
+    anchor     INTEGER,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS overlay_audit (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    request_id TEXT,
+    rule_id    INTEGER,
+    action     TEXT NOT NULL,
+    detail     TEXT,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_overlay_rules_session ON overlay_rules(session_id);
+  CREATE INDEX IF NOT EXISTS idx_overlay_audit_session ON overlay_audit(session_id);
   CREATE INDEX IF NOT EXISTS idx_prompts_session   ON prompts(session_id);
   CREATE INDEX IF NOT EXISTS idx_prompts_ts        ON prompts(timestamp);
   CREATE INDEX IF NOT EXISTS idx_tool_calls_prompt ON tool_calls(prompt_id, call_order);
