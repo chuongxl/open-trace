@@ -26,5 +26,15 @@ export const config = {
     contextWindowTokens: num('CONTEXT_WINDOW_TOKENS', 200000),
     costUsd:             num('DETECT_COST_USD', 5),          // session equiv. cost
   },
+  // Privacy (#64). REDACT=0 turns redaction off; REDACT_PATTERNS is a JSON array of extra regex sources.
+  redaction: {
+    enabled: process.env.REDACT !== '0',
+    extraPatterns: (() => {
+      try { const v = JSON.parse(process.env.REDACT_PATTERNS ?? '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; }
+      catch { console.warn('[config] REDACT_PATTERNS is not valid JSON; ignoring it'); return []; }
+    })(),
+  },
+  // Delete prompts, tool calls and sessions older than this many days. 0 (default) keeps everything.
+  retentionDays: num('RETENTION_DAYS', 0),
   version:         '0.1.0',
 };

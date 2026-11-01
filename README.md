@@ -77,6 +77,15 @@ cd daemon && node --watch index.js
 cd dashboard && npm run dev
 ```
 
+## Privacy: redaction and retention
+
+Prompts and tool output can contain secrets, so they are cleaned before they are stored (the traffic itself is forwarded unchanged):
+
+- **Redaction** (on by default; `REDACT=0` turns it off): Anthropic/OpenAI/GitHub/AWS/Google/Slack/Stripe keys, JWTs, `Bearer` tokens, private-key blocks, and `api_key=…` / `password: …` style values are replaced with `[REDACTED:kind]`. It runs on every stored prompt, tool input/output and optimization, and on the raw request/response *before* they are cut to 32 KB. Add your own patterns with `REDACT_PATTERNS='["ACME-\\d{6}"]'` (JSON array of regex sources). Redaction is pattern based, so it is a safety net, not a guarantee.
+- **Existing data:** rows stored before this existed are cleaned once with `npm run redact-stored`.
+- **Retention** (off by default): `RETENTION_DAYS=90` deletes prompts, tool calls and optimizations older than 90 days, and sessions left empty (with their alerts and overlay rules), at startup and every 6 hours. A session with any recent prompt is kept whole. OpenCode sessions older than the window are not re-imported.
+- Not redacted: guidance you inject through the overlay (it is sent to the model as typed) and its audit trail.
+
 ## Local API security
 
 The daemon binds to `127.0.0.1`, but browsers can still reach it, so the API is guarded (`daemon/security.js`):

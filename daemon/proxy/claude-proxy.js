@@ -24,6 +24,7 @@ import { upsertSession, insertPrompt, insertToolCall, setToolCallOutput } from '
 import { estimateCost } from '../pricing/models.js';
 import { analyzeContext } from '../context.js';
 import { emit } from '../events.js';
+import { redact } from '../redact.js';
 import { syntheticEndTurn } from './synthetic.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -169,10 +170,15 @@ function extractUserText(messages) {
  * Safely JSON-stringify and cap at maxBytes.
  * Returns null (with a logged warning) on serialization failure.
  */
+/** Redact, then cap: a secret straddling the cap must be removed before the text is cut. */
+function capText(text, maxBytes) {
+  const s = redact(text);
+  return s.length > maxBytes ? s.slice(0, maxBytes) + '\u2026' : s;
+}
+
 function capJson(obj, maxBytes) {
   try {
-    const s = JSON.stringify(obj);
-    return s.length > maxBytes ? s.slice(0, maxBytes) + '\u2026' : s;
+    return capText(JSON.stringify(obj), maxBytes);
   } catch (err) {
     console.warn('[claude-proxy] capJson serialization failed:', err.message);
     return null;
@@ -195,7 +201,7 @@ function captureToolResults(messages, arrivedAt) {
       const text = typeof b.content === 'string' ? b.content
         : Array.isArray(b.content) ? b.content.map(c => c.type === 'text' ? c.text : '[' + c.type + ']').join('\n')
         : '';
-      setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text, arrivedAt, b.is_error === true);
+      setToolCallOutput(b.tool_use_id, capText(text, MAX_TOOL_BYTES), arrivedAt, b.is_error === true);
     }
   }
 }
@@ -302,8 +308,7 @@ export function parseNonStreaming(reqBody, rawRespStr, timing) {
   const model    = reqBody.model || resp.model || 'unknown';
   const toolUses = (resp.content || []).filter(b => b.type === 'tool_use');
   const rawReq   = capJson(reqBody, MAX_RAW_BYTES);
-  const rawResp  = rawRespStr.length > MAX_RAW_BYTES
-    ? rawRespStr.slice(0, MAX_RAW_BYTES) + '\u2026' : rawRespStr;
+  const rawResp  = capText(rawRespStr, MAX_RAW_BYTES);
 
   writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp, timing);
 }
@@ -415,7 +420,7 @@ export function parseStreamAndStore(reqBody, sseText, timing) {
     cache_read_tokens: cacheRead, cache_write_tokens: cacheWrite,
   };
   const rawReq  = capJson(reqBody, MAX_RAW_BYTES);
-  const rawResp = sseText.length > MAX_RAW_BYTES ? sseText.slice(0, MAX_RAW_BYTES) + '\u2026' : sseText;
+  const rawResp = capText(sseText, MAX_RAW_BYTES);
 
   writeToDb(reqBody, usage, model, toolUses, rawReq, rawResp, timing);
 }
