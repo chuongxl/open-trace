@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getSession } from '../api/client.js'
 import Breadcrumb from '../components/Breadcrumb.jsx'
+import DebugControls from '../components/DebugControls.jsx'
 import CostBadge from '../components/CostBadge.jsx'
 import LoadingSkeleton from '../components/LoadingSkeleton.jsx'
 import ToolBadge from '../components/ToolBadge.jsx'
@@ -47,7 +48,8 @@ export default function SessionDetail() {
           </Link>
         )}
       </div>
-      <div className="mt-1 text-xs text-neutral-400">
+      {session.tool === 'claude-code' && <DebugControls sessionId={id} />}
+      <div className="mt-2 text-xs text-neutral-400">
         {session.model} · started {new Date(session.started_at).toLocaleString()} ·{' '}
         {formatTokenCount(session.total_input_tokens)} in / {formatTokenCount(session.total_output_tokens)} out
       </div>

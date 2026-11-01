@@ -8,8 +8,9 @@ import { config } from './config.js';
 import { guard, loadToken, DEV_ORIGINS } from './security.js';
 import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
-import { createClaudeProxy } from './proxy/claude-proxy.js';
+import { createClaudeProxy, setRequestHook } from './proxy/claude-proxy.js';
 import { startDetectors } from './detectors.js';
+import { debugHook, startDebugger } from './debugger.js';
 import { startOpenCodeWatcher } from './watchers/opencode-watcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -44,7 +45,9 @@ server.listen(config.daemonPort, '127.0.0.1', () => {
   console.log('[open-trace] DB: ' + config.dbPath);
 });
 
-// Start Claude Code intercepting proxy
+// Start Claude Code intercepting proxy (the debugger holds/stops requests through its hook)
+setRequestHook(debugHook);
+startDebugger();
 createClaudeProxy(config.claudeProxyPort);
 
 // Stuck-agent detectors listen on the event bus
