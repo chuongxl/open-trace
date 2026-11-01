@@ -166,3 +166,12 @@ test('break on alert pauses an opted-in session at its next request; others are 
   await api(`/sessions/${sid}/break-on-alert`, 'POST', { enabled: false });
   stop();
 });
+
+test('isContinuation sees through a trailing system message (real Claude Code shape) (#88)', () => {
+  const c = continuation();
+  assert.equal(dbg.isContinuation(c), true);
+  c.messages.push({ role: 'system', content: [{ type: 'text', text: 'reminder' }] });
+  assert.equal(dbg.isContinuation(c), true);
+  const fresh = req('a new prompt'); fresh.messages.push({ role: 'system', content: 'x' });
+  assert.equal(dbg.isContinuation(fresh), false);
+});

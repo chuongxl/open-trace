@@ -177,3 +177,54 @@ test('without timing info the proxy still stores rows and leaves timing null (#7
   assert.equal(prompt.first_token_ms, null);
   assert.equal(prompt.request_ms, null);
 });
+
+// Shapes taken from a real Claude Code 2.1.x request (issue #88).
+test('project is found from Claude Code\'s "Primary working directory:" line (#88)', () => {
+  const cwd = '/tmp/proj-real-shape';
+  proxy.parseNonStreaming({
+    model: 'claude-haiku-4-5', stream: false,
+    system: [{ type: 'text', text: '# Environment\nYou have been invoked in the following environment: \n - Primary working directory: ' + cwd + '\n - Is a git repository: false\n' }],
+    messages: [{ role: 'user', content: 'hi' }],
+  }, textReply);
+  const [session] = store.getSessions({ project: cwd });
+  assert.ok(session, 'session grouped under the project path');
+  assert.equal(session.project_name, 'proj-real-shape');
+});
+
+test('input_text is the user\'s prompt, not the injected system-reminder blocks (#88)', () => {
+  const cwd = '/tmp/proj-reminders';
+  proxy.parseNonStreaming({
+    model: 'claude-haiku-4-5', stream: false, system: 'cwd: ' + cwd,
+    messages: [{ role: 'user', content: [
+      { type: 'text', text: '<system-reminder>\nContents of CLAUDE.md ...\n</system-reminder>' },
+      { type: 'text', text: '<system-reminder>\nuserEmail ...\n</system-reminder>' },
+      { type: 'text', text: 'Read notes.txt and tell me its first word.' },
+    ] }],
+  }, textReply);
+  const [session] = store.getSessions({ project: cwd });
+  assert.equal(store.getPrompts(session.id)[0].input_text, 'Read notes.txt and tell me its first word.');
+});
+
+test('project is found when the environment block is in the first user message instead of system (#88)', () => {
+  const cwd = '/tmp/proj-in-message';
+  proxy.parseNonStreaming({
+    model: 'claude-haiku-4-5', stream: false, system: 'You are Claude Code.',
+    messages: [{ role: 'user', content: [
+      { type: 'text', text: '<system-reminder>\n# Environment\n - Primary working directory: ' + cwd + '\n - Platform: darwin\n</system-reminder>' },
+      { type: 'text', text: 'hello' },
+    ] }],
+  }, textReply);
+  assert.equal(store.getSessions({ project: cwd }).length, 1);
+});
+
+// Real Claude Code 2.1.x shape: a role:"system" message (tool_addition blocks) follows the tool_result message.
+test('tool results are captured when a system message follows them (#88)', () => {
+  const cwd = '/tmp/proj-sysmsg';
+  proxy.parseStreamAndStore(reqBody(cwd, 'read it'), toolStream(['toolu_s1', 'Read', '{"file_path":"a.js"}']), { startedAt: 1000, endedAt: 2000 });
+  const req = nextTurn(cwd, { id: 'toolu_s1', content: 'file contents' });
+  req.messages.push({ role: 'system', content: [{ type: 'text', text: 'reminder' }, { type: 'tool_addition', name: 'x' }] });
+  proxy.parseNonStreaming(req, textReply, { startedAt: 3500, endedAt: 4000 });
+  const call = callsFor(cwd).find(c => c.name === 'Read');
+  assert.equal(call.output, 'file contents');
+  assert.equal(call.duration_ms, 1500);
+});

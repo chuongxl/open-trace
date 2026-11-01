@@ -36,7 +36,11 @@ const ANTHROPIC_HOST      = 'api.anthropic.com';
 // Where requests are forwarded. Overridable via createClaudeProxy(port, { upstream }) for tests.
 let upstream = { hostname: ANTHROPIC_HOST, port: 443, tls: true };
 const upstreamRequest = (options, cb) =>
-  (upstream.tls ? https : http).request({ ...options, hostname: upstream.hostname, port: upstream.port, headers: { ...options.headers, host: upstream.hostname } }, cb);
+  (upstream.tls ? https : http).request({ ...options, hostname: upstream.hostname, port: upstream.port, headers: {
+    ...options.headers, host: upstream.hostname,
+    // Responses are parsed as text to store usage and tool calls, so they must not be compressed.
+    'accept-encoding': 'identity',
+  } }, cb);
 
 // ─── Request pipeline (Phase 12c, #55) ───────────────────────────────────────
 
@@ -81,11 +85,28 @@ function extractSystemText(reqBody) {
 
 /**
  * Extract the working directory from Claude Code's injected system prompt.
- * Claude Code always injects a line like: 'cwd: /Users/alex/dev/myproject'
+ * Claude Code injects ' - Primary working directory: /Users/alex/dev/myproject' (older: 'cwd: ...')
  */
 function extractCwd(systemText) {
-  const m = systemText.match(/cwd[:\s]+([^\n\r,"]+)/i);
+  // Claude Code 2.x: " - Primary working directory: /path"; older versions: "cwd: /path".
+  const m = systemText.match(/Primary working directory:[ \t]*([^\n\r]+)/i) ?? systemText.match(/cwd[:\s]+([^\n\r,"]+)/i);
   return m ? m[1].trim() : null;
+}
+
+/**
+ * Working directory of the request. Usually in the system prompt, but Claude Code also puts its
+ * environment block in the first user message, so look at the first messages' text when the system has none.
+ */
+function cwdOf(reqBody) {
+  const fromSystem = extractCwd(extractSystemText(reqBody));
+  if (fromSystem || !Array.isArray(reqBody.messages)) return fromSystem;
+  for (const m of reqBody.messages.slice(0, 2)) {
+    const text = typeof m.content === 'string' ? m.content
+      : Array.isArray(m.content) ? m.content.filter(b => b.type === 'text').map(b => b.text || '').join(' ') : '';
+    const cwd = extractCwd(text);
+    if (cwd) return cwd;
+  }
+  return null;
 }
 
 /**
@@ -94,7 +115,7 @@ function extractCwd(systemText) {
  * A gap of more than SESSION_TIMEOUT_MS starts a fresh session.
  */
 function deriveSessionId(reqBody) {
-  const cwd = extractCwd(extractSystemText(reqBody));
+  const cwd = cwdOf(reqBody);
   const key = cwd || 'unknown';
   const now = Date.now();
   const ex  = sessionMap.get(key);
@@ -113,7 +134,7 @@ function deriveSessionId(reqBody) {
 
 /** Return project path and name for the current session key. */
 function getProjectInfo(reqBody) {
-  const cwd   = extractCwd(extractSystemText(reqBody));
+  const cwd   = cwdOf(reqBody);
   const entry = sessionMap.get(cwd || 'unknown');
   return {
     projectPath: entry?.projectPath ?? cwd ?? null,
@@ -138,7 +159,9 @@ function extractUserText(messages) {
   if (typeof last.content === 'string') return last.content.slice(0, 2000);
   // A tool-result message is a loop continuation: any text beside it is harness noise, not the user's prompt.
   if (Array.isArray(last.content) && !last.content.some(b => b.type === 'tool_result'))
-    return last.content.filter(b => b.type === 'text').map(b => b.text || '').join(' ').slice(0, 2000);
+    // Claude Code prepends <system-reminder> blocks (CLAUDE.md, account, attribution); the prompt is what follows.
+    return last.content.filter(b => b.type === 'text' && !(b.text || '').trimStart().startsWith('<system-reminder>'))
+      .map(b => b.text || '').join(' ').slice(0, 2000);
   return null;
 }
 
@@ -161,14 +184,19 @@ function capJson(obj, maxBytes) {
  * last user message of turn N+1's request. Attach each to its stored call.
  */
 function captureToolResults(messages, arrivedAt) {
-  const last = Array.isArray(messages) ? messages[messages.length - 1] : null;
-  if (last?.role !== 'user' || !Array.isArray(last.content)) return;
-  for (const b of last.content) {
-    if (b.type !== 'tool_result' || !b.tool_use_id) continue;
-    const text = typeof b.content === 'string' ? b.content
-      : Array.isArray(b.content) ? b.content.map(c => c.type === 'text' ? c.text : '[' + c.type + ']').join('\n')
-      : '';
-    setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text, arrivedAt, b.is_error === true);
+  if (!Array.isArray(messages)) return;
+  // Everything after the last assistant message is new. Claude Code 2.x follows the tool_result
+  // message with a role:"system" message, so the result is not necessarily the last message.
+  for (let i = messages.length - 1; i >= 0 && messages[i].role !== 'assistant'; i--) {
+    const m = messages[i];
+    if (m.role !== 'user' || !Array.isArray(m.content)) continue;
+    for (const b of m.content) {
+      if (b.type !== 'tool_result' || !b.tool_use_id) continue;
+      const text = typeof b.content === 'string' ? b.content
+        : Array.isArray(b.content) ? b.content.map(c => c.type === 'text' ? c.text : '[' + c.type + ']').join('\n')
+        : '';
+      setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text, arrivedAt, b.is_error === true);
+    }
   }
 }
 

@@ -28,7 +28,8 @@ function refresh(s) {
 
 /** A tool-loop continuation: the last user message answers tool calls rather than carrying a new prompt. */
 export function isContinuation(body) {
-  const last = Array.isArray(body?.messages) ? body.messages[body.messages.length - 1] : null;
+  // Claude Code 2.x appends a role:"system" message after the tool results; look at the last user message.
+  const last = Array.isArray(body?.messages) ? [...body.messages].reverse().find((m) => m.role === 'user') : null;
   return last?.role === 'user' && Array.isArray(last.content) && last.content.some((b) => b.type === 'tool_result');
 }
 
