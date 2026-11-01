@@ -216,3 +216,15 @@ test('project is found when the environment block is in the first user message i
   }, textReply);
   assert.equal(store.getSessions({ project: cwd }).length, 1);
 });
+
+// Real Claude Code 2.1.x shape: a role:"system" message (tool_addition blocks) follows the tool_result message.
+test('tool results are captured when a system message follows them (#88)', () => {
+  const cwd = '/tmp/proj-sysmsg';
+  proxy.parseStreamAndStore(reqBody(cwd, 'read it'), toolStream(['toolu_s1', 'Read', '{"file_path":"a.js"}']), { startedAt: 1000, endedAt: 2000 });
+  const req = nextTurn(cwd, { id: 'toolu_s1', content: 'file contents' });
+  req.messages.push({ role: 'system', content: [{ type: 'text', text: 'reminder' }, { type: 'tool_addition', name: 'x' }] });
+  proxy.parseNonStreaming(req, textReply, { startedAt: 3500, endedAt: 4000 });
+  const call = callsFor(cwd).find(c => c.name === 'Read');
+  assert.equal(call.output, 'file contents');
+  assert.equal(call.duration_ms, 1500);
+});

@@ -184,14 +184,19 @@ function capJson(obj, maxBytes) {
  * last user message of turn N+1's request. Attach each to its stored call.
  */
 function captureToolResults(messages, arrivedAt) {
-  const last = Array.isArray(messages) ? messages[messages.length - 1] : null;
-  if (last?.role !== 'user' || !Array.isArray(last.content)) return;
-  for (const b of last.content) {
-    if (b.type !== 'tool_result' || !b.tool_use_id) continue;
-    const text = typeof b.content === 'string' ? b.content
-      : Array.isArray(b.content) ? b.content.map(c => c.type === 'text' ? c.text : '[' + c.type + ']').join('\n')
-      : '';
-    setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text, arrivedAt, b.is_error === true);
+  if (!Array.isArray(messages)) return;
+  // Everything after the last assistant message is new. Claude Code 2.x follows the tool_result
+  // message with a role:"system" message, so the result is not necessarily the last message.
+  for (let i = messages.length - 1; i >= 0 && messages[i].role !== 'assistant'; i--) {
+    const m = messages[i];
+    if (m.role !== 'user' || !Array.isArray(m.content)) continue;
+    for (const b of m.content) {
+      if (b.type !== 'tool_result' || !b.tool_use_id) continue;
+      const text = typeof b.content === 'string' ? b.content
+        : Array.isArray(b.content) ? b.content.map(c => c.type === 'text' ? c.text : '[' + c.type + ']').join('\n')
+        : '';
+      setToolCallOutput(b.tool_use_id, text.length > MAX_TOOL_BYTES ? text.slice(0, MAX_TOOL_BYTES) + '\u2026' : text, arrivedAt, b.is_error === true);
+    }
   }
 }
 
