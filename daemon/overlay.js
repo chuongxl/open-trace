@@ -46,7 +46,8 @@ export function validateRequest(body, original = body) {
   if (!Array.isArray(msgs) || !msgs.length) return ['request has no messages'];
   if (msgs[0].role !== 'user') problems.push('conversation must start with a user message');
   msgs.forEach((m, i) => {
-    if (m.role !== 'user' && m.role !== 'assistant') problems.push(`message ${i} has invalid role "${m.role}"`);
+    // Claude Code 2.x also sends role:"system" messages (reminders, tool additions); they are valid as they are.
+    if (!['user', 'assistant', 'system'].includes(m.role)) problems.push(`message ${i} has invalid role "${m.role}"`);
     if (typeof m.content === 'string' ? !m.content.trim() : !(Array.isArray(m.content) && m.content.length)) problems.push(`message ${i} is empty`);
   });
 
@@ -66,9 +67,17 @@ export function validateRequest(body, original = body) {
   return problems;
 }
 
+// Index of the user message guidance should join: the last message, or the user message just before
+// trailing role:"system" messages (Claude Code ends its history with those). -1 means add a new message.
+function userTarget(msgs) {
+  let i = msgs.length - 1;
+  while (i >= 0 && msgs[i].role === 'system') i--;
+  return i >= 0 && msgs[i].role === 'user' ? i : -1;
+}
+
 function pushUser(out, text) {
-  const last = out[out.length - 1];
-  if (last?.role === 'user') last.content = [...blocksOf(last), { type: 'text', text }];
+  const i = userTarget(out);
+  if (i >= 0) out[i].content = [...blocksOf(out[i]), { type: 'text', text }];
   else out.push({ role: 'user', content: [{ type: 'text', text }] });
 }
 
@@ -150,7 +159,11 @@ export function editsFrom(rule, body) {
   const { kind, params } = rule;
   if (kind === 'replace_message') return params.index;
   if (kind === 'delete_message') return Math.min(...params.indices);
-  if (kind === 'append_user_message') return Math.max(0, (rule.anchor ?? msgs.length) - 1);
+  if (kind === 'append_user_message') {
+    const at = Math.max(1, rule.anchor ?? msgs.length);
+    const target = userTarget(msgs.slice(0, at));
+    return target >= 0 ? target : at - 1; // a new message re-writes the cached tail (the last message carries the cache breakpoint)
+  }
   const hit = msgs.findIndex((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_result' && (!params.tool_use_id || b.tool_use_id === params.tool_use_id) && chars(b.content) > params.max_chars));
   return hit === -1 ? null : hit;
 }

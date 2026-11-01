@@ -123,3 +123,34 @@ test('cacheImpact estimates the one-time cache re-write from the first edited me
   assert.ok(early.extra_equiv_cost_usd > late.extra_equiv_cost_usd && late.extra_equiv_cost_usd > 0);
   assert.equal(cacheImpact(b, null).extra_equiv_cost_usd, 0);
 });
+
+// Real Claude Code 2.1.x history: role:"system" messages sit between and after the turns.
+const realShape = () => ({
+  model: 'claude-sonnet-4-5',
+  messages: [
+    { role: 'user', content: [{ type: 'text', text: '<system-reminder>ctx</system-reminder>' }, { type: 'text', text: 'read notes.txt' }] },
+    { role: 'system', content: [{ type: 'text', text: 'reminder' }] },
+    { role: 'assistant', content: [tu('t1')] },
+    { role: 'user', content: [tr('t1', 'banana')] },
+    { role: 'system', content: [{ type: 'text', text: 'additions' }, { type: 'tool_addition', name: 'x' }] },
+  ],
+});
+
+test('role:"system" messages are valid, and guidance joins the user message before trailing system messages', () => {
+  assert.deepEqual(validateRequest(realShape()), []);
+  const r = applyRules(realShape(), [rule(1, 'append_user_message', { text: 'GUIDE' })]);
+  assert.deepEqual(r.problems, []);
+  const m = r.body.messages;
+  assert.equal(m.length, 5, 'no extra message');
+  assert.equal(m[4].role, 'system');
+  assert.deepEqual(m[3].content.map(b => b.type), ['tool_result', 'text'], 'after the tool_result, before the system message');
+  assert.equal(m[3].content[1].text, 'GUIDE');
+  assert.equal(editsFrom(rule(1, 'append_user_message', { text: 'x' }), realShape()), 3, 'cache preview points at the message actually changed');
+});
+
+test('guidance on a first request (user then system) joins the user message', () => {
+  const first = { model: 'claude-sonnet-4-5', messages: realShape().messages.slice(0, 2) };
+  const m = applyRules(first, [rule(1, 'append_user_message', { text: 'GUIDE' })]).body.messages;
+  assert.equal(m.length, 2);
+  assert.equal(m[0].content.at(-1).text, 'GUIDE');
+});
