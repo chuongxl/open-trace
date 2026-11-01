@@ -204,3 +204,15 @@ test('input_text is the user\'s prompt, not the injected system-reminder blocks 
   const [session] = store.getSessions({ project: cwd });
   assert.equal(store.getPrompts(session.id)[0].input_text, 'Read notes.txt and tell me its first word.');
 });
+
+test('project is found when the environment block is in the first user message instead of system (#88)', () => {
+  const cwd = '/tmp/proj-in-message';
+  proxy.parseNonStreaming({
+    model: 'claude-haiku-4-5', stream: false, system: 'You are Claude Code.',
+    messages: [{ role: 'user', content: [
+      { type: 'text', text: '<system-reminder>\n# Environment\n - Primary working directory: ' + cwd + '\n - Platform: darwin\n</system-reminder>' },
+      { type: 'text', text: 'hello' },
+    ] }],
+  }, textReply);
+  assert.equal(store.getSessions({ project: cwd }).length, 1);
+});

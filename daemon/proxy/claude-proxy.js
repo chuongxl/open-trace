@@ -94,12 +94,28 @@ function extractCwd(systemText) {
 }
 
 /**
+ * Working directory of the request. Usually in the system prompt, but Claude Code also puts its
+ * environment block in the first user message, so look at the first messages' text when the system has none.
+ */
+function cwdOf(reqBody) {
+  const fromSystem = extractCwd(extractSystemText(reqBody));
+  if (fromSystem || !Array.isArray(reqBody.messages)) return fromSystem;
+  for (const m of reqBody.messages.slice(0, 2)) {
+    const text = typeof m.content === 'string' ? m.content
+      : Array.isArray(m.content) ? m.content.filter(b => b.type === 'text').map(b => b.text || '').join(' ') : '';
+    const cwd = extractCwd(text);
+    if (cwd) return cwd;
+  }
+  return null;
+}
+
+/**
  * Derive or reuse a session ID for this request.
  * Groups successive prompts from the same working directory into one session.
  * A gap of more than SESSION_TIMEOUT_MS starts a fresh session.
  */
 function deriveSessionId(reqBody) {
-  const cwd = extractCwd(extractSystemText(reqBody));
+  const cwd = cwdOf(reqBody);
   const key = cwd || 'unknown';
   const now = Date.now();
   const ex  = sessionMap.get(key);
@@ -118,7 +134,7 @@ function deriveSessionId(reqBody) {
 
 /** Return project path and name for the current session key. */
 function getProjectInfo(reqBody) {
-  const cwd   = extractCwd(extractSystemText(reqBody));
+  const cwd   = cwdOf(reqBody);
   const entry = sessionMap.get(cwd || 'unknown');
   return {
     projectPath: entry?.projectPath ?? cwd ?? null,
