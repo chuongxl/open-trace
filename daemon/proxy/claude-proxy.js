@@ -36,7 +36,11 @@ const ANTHROPIC_HOST      = 'api.anthropic.com';
 // Where requests are forwarded. Overridable via createClaudeProxy(port, { upstream }) for tests.
 let upstream = { hostname: ANTHROPIC_HOST, port: 443, tls: true };
 const upstreamRequest = (options, cb) =>
-  (upstream.tls ? https : http).request({ ...options, hostname: upstream.hostname, port: upstream.port, headers: { ...options.headers, host: upstream.hostname } }, cb);
+  (upstream.tls ? https : http).request({ ...options, hostname: upstream.hostname, port: upstream.port, headers: {
+    ...options.headers, host: upstream.hostname,
+    // Responses are parsed as text to store usage and tool calls, so they must not be compressed.
+    'accept-encoding': 'identity',
+  } }, cb);
 
 // ─── Request pipeline (Phase 12c, #55) ───────────────────────────────────────
 
@@ -81,10 +85,11 @@ function extractSystemText(reqBody) {
 
 /**
  * Extract the working directory from Claude Code's injected system prompt.
- * Claude Code always injects a line like: 'cwd: /Users/alex/dev/myproject'
+ * Claude Code injects ' - Primary working directory: /Users/alex/dev/myproject' (older: 'cwd: ...')
  */
 function extractCwd(systemText) {
-  const m = systemText.match(/cwd[:\s]+([^\n\r,"]+)/i);
+  // Claude Code 2.x: " - Primary working directory: /path"; older versions: "cwd: /path".
+  const m = systemText.match(/Primary working directory:[ \t]*([^\n\r]+)/i) ?? systemText.match(/cwd[:\s]+([^\n\r,"]+)/i);
   return m ? m[1].trim() : null;
 }
 
@@ -138,7 +143,9 @@ function extractUserText(messages) {
   if (typeof last.content === 'string') return last.content.slice(0, 2000);
   // A tool-result message is a loop continuation: any text beside it is harness noise, not the user's prompt.
   if (Array.isArray(last.content) && !last.content.some(b => b.type === 'tool_result'))
-    return last.content.filter(b => b.type === 'text').map(b => b.text || '').join(' ').slice(0, 2000);
+    // Claude Code prepends <system-reminder> blocks (CLAUDE.md, account, attribution); the prompt is what follows.
+    return last.content.filter(b => b.type === 'text' && !(b.text || '').trimStart().startsWith('<system-reminder>'))
+      .map(b => b.text || '').join(' ').slice(0, 2000);
   return null;
 }
 

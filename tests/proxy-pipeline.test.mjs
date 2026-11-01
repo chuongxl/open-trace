@@ -3,6 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'http';
+import { gzipSync } from 'node:zlib';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,8 +26,11 @@ before(async () => {
       const body = Buffer.concat(chunks);
       seen.push({ body, headers: req.headers });
       const stream = JSON.parse(body.toString()).stream;
-      res.writeHead(200, { 'content-type': stream ? 'text/event-stream' : 'application/json' });
-      res.end(stream ? SSE : REPLY);
+      // Like the real API: compress when the client asks for it.
+      const gz = /gzip/.test(req.headers['accept-encoding'] ?? '');
+      const payload = stream ? SSE : REPLY;
+      res.writeHead(200, { 'content-type': stream ? 'text/event-stream' : 'application/json', ...(gz && { 'content-encoding': 'gzip' }) });
+      res.end(gz ? gzipSync(payload) : payload);
     });
   });
   await new Promise(r => upstream.listen(0, '127.0.0.1', r));
@@ -140,4 +144,21 @@ test('turn_started is emitted with the same requestId the hook saw, before the r
   assert.equal(started.data.request_id, hookId);
   assert.ok(started.data.session_id);
   assert.ok(events.findIndex(e => e.type === 'turn_started') < events.findIndex(e => e.type === 'turn_finished'));
+});
+
+test('a client that accepts gzip still gets responses the proxy can parse and store (#88)', async () => {
+  proxy.setRequestHook(null);
+  const store = await import('../daemon/db/store.js');
+  const body = Buffer.from(ODD.replace('/tmp/pipe', '/tmp/pipe-gzip'));
+  const r = await new Promise((resolve, reject) => {
+    const q = http.request({ host: '127.0.0.1', port: proxyPort, path: '/v1/messages', method: 'POST', headers: { 'content-type': 'application/json', 'content-length': body.length, 'accept-encoding': 'gzip, deflate, br' } }, (res) => {
+      const out = []; res.on('data', c => out.push(c)); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(out).toString() }));
+    });
+    q.on('error', reject); q.end(body);
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body, REPLY, 'client receives plain JSON');
+  assert.equal(seen.at(-1).headers['accept-encoding'], 'identity', 'upstream is asked not to compress');
+  const [session] = store.getSessions({ project: '/tmp/pipe-gzip' });
+  assert.equal(store.getPrompts(session.id)[0].output_tokens, 1, 'usage parsed from the response');
 });
