@@ -4,9 +4,10 @@ import { join } from 'path';
 import { homedir } from 'os';
 import * as store from '../db/store.js';
 import { config } from '../config.js';
-import { subscribe } from '../events.js';
+import { subscribe, emit } from '../events.js';
 import { diffContext } from '../context.js';
 import * as debug from '../debugger.js';
+import { applyRules, checkRule, editsFrom, cacheImpact, isPassthrough, setPassthrough } from '../overlay.js';
 
 const router = Router();
 
@@ -72,6 +73,75 @@ for (const [action, fn] of Object.entries({ pause: debug.pause, step: debug.step
 router.post('/sessions/:id/break-on-alert', (req, res) => {
   if (!store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });
   res.json(debug.setBreakOnAlert(req.params.id, req.body?.enabled === true));
+});
+
+// ─── Context overlay (Phase 15) ───────────────────────────────────────────────
+const sessionOr404 = (req, res) => {
+  if (store.getSession(req.params.id)) return true;
+  res.status(404).json({ error: 'Session not found' });
+  return false;
+};
+
+/** Dry-run a candidate rule against the held request: effect, validity and one-time cache cost. */
+function previewRule(sessionId, kind, params) {
+  const body = debug.heldBody(sessionId);
+  if (!body) return null;
+  const rules = store.getOverlayRules(sessionId);
+  const candidate = { id: 0, kind, params, anchor: null };
+  const { effects, problems, body: out } = applyRules(body, [...rules, candidate]);
+  const effect = effects.find((e) => e.rule_id === 0);
+  const problemsList = problems.length ? problems : effect && !effect.ok ? [effect.note] : [];
+  return {
+    valid: problemsList.length === 0,
+    problems: problemsList,
+    note: effect?.note ?? null,
+    messages_before: body.messages.length,
+    messages_after: out.messages.length,
+    cache: cacheImpact(body, editsFrom(candidate, body)),
+  };
+}
+
+router.get('/overlay', (_req, res) => res.json({ passthrough: isPassthrough() }));
+router.post('/overlay/passthrough', (req, res) => {
+  setPassthrough(req.body?.enabled === true);
+  res.json({ passthrough: isPassthrough() });
+});
+
+router.get('/sessions/:id/overlay', (req, res) => {
+  if (!sessionOr404(req, res)) return;
+  res.json({ passthrough: isPassthrough(), rules: store.getOverlayRules(req.params.id), audit: store.getOverlayAudit(req.params.id) });
+});
+
+router.post('/sessions/:id/overlay/preview', (req, res) => {
+  if (!sessionOr404(req, res)) return;
+  const { kind, params } = req.body ?? {};
+  const bad = checkRule(kind, params);
+  if (bad.length) return res.status(400).json({ error: bad.join('; ') });
+  const preview = previewRule(req.params.id, kind, params);
+  if (!preview) return res.status(409).json({ error: 'Pause the session and wait for a held request to preview an edit.' });
+  res.json(preview);
+});
+
+router.post('/sessions/:id/overlay/rules', (req, res) => {
+  if (!sessionOr404(req, res)) return;
+  const { kind, params } = req.body ?? {};
+  const bad = checkRule(kind, params);
+  if (bad.length) return res.status(400).json({ error: bad.join('; ') });
+  const preview = previewRule(req.params.id, kind, params); // null when nothing is held: validated when applied
+  if (preview && !preview.valid) return res.status(400).json({ error: preview.problems.join('; '), preview });
+  const rule = store.addOverlayRule(req.params.id, kind, params);
+  store.addOverlayAudit({ session_id: req.params.id, rule_id: rule.id, action: 'rule_added', detail: `${kind} ${JSON.stringify(params)}` });
+  emit('overlay_changed', { session_id: req.params.id });
+  res.status(201).json({ rule, preview });
+});
+
+router.delete('/sessions/:id/overlay/rules/:ruleId', (req, res) => {
+  if (!sessionOr404(req, res)) return;
+  const id = Number(req.params.ruleId);
+  if (!store.removeOverlayRule(req.params.id, id)) return res.status(404).json({ error: 'Rule not found' });
+  store.addOverlayAudit({ session_id: req.params.id, rule_id: id, action: 'rule_removed' });
+  emit('overlay_changed', { session_id: req.params.id });
+  res.json({ ok: true });
 });
 
 // Per-request context size by section (chars; the UI shows ~chars/4 tokens) and the diff vs the previous request.

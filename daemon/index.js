@@ -10,7 +10,8 @@ import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
 import { createClaudeProxy, setRequestHook } from './proxy/claude-proxy.js';
 import { startDetectors } from './detectors.js';
-import { debugHook, startDebugger } from './debugger.js';
+import { startDebugger } from './debugger.js';
+import { pipelineHook } from './hooks.js';
 import { startOpenCodeWatcher } from './watchers/opencode-watcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -46,7 +47,7 @@ server.listen(config.daemonPort, '127.0.0.1', () => {
 });
 
 // Start Claude Code intercepting proxy (the debugger holds/stops requests through its hook)
-setRequestHook(debugHook);
+setRequestHook(pipelineHook);
 startDebugger();
 createClaudeProxy(config.claudeProxyPort);
 

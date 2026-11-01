@@ -76,7 +76,7 @@ export function getSessionContext(id) {
 /** Subscribe to the daemon's live event stream; returns an unsubscribe function. */
 export function subscribeLive(onEvent, onStatus = () => {}) {
   const source = new EventSource(`${BASE}/live`)
-  for (const type of ['turn_started', 'turn_finished', 'session_updated', 'alert', 'debug_state', 'turn_stopped']) {
+  for (const type of ['turn_started', 'turn_finished', 'session_updated', 'alert', 'debug_state', 'turn_stopped', 'overlay_changed', 'overlay_applied']) {
     source.addEventListener(type, (e) => onEvent({ type, data: JSON.parse(e.data) }))
   }
   source.onopen = () => onStatus(true)
@@ -99,4 +99,26 @@ export function setBreakOnAlert(id, enabled) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
   })
+}
+
+const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
+export function getOverlay(id) {
+  return request(`/sessions/${encodeURIComponent(id)}/overlay`)
+}
+
+export function previewOverlayRule(id, rule) {
+  return request(`/sessions/${encodeURIComponent(id)}/overlay/preview`, json('POST', rule))
+}
+
+export function addOverlayRule(id, rule) {
+  return request(`/sessions/${encodeURIComponent(id)}/overlay/rules`, json('POST', rule))
+}
+
+export function removeOverlayRule(id, ruleId) {
+  return request(`/sessions/${encodeURIComponent(id)}/overlay/rules/${ruleId}`, { method: 'DELETE' })
+}
+
+export function setPassthrough(enabled) {
+  return request('/overlay/passthrough', json('POST', { enabled }))
 }

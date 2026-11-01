@@ -72,6 +72,15 @@ until they can be pointed at the proxy via a base-URL setting.
 - **Audit trail**: every rule and its effect is stored and shown on the session timeline (the client transcript will not show it).
 - Global **pass-through** toggle disables the overlay entirely.
 
+**Implemented (#59).** `daemon/overlay.js` (rules, validator, cache estimate, proxy hook), tables `overlay_rules` / `overlay_audit`, `daemon/hooks.js` (debugger decides hold/stop first, then the overlay edits what is released).
+- **Rules** are stored per session and applied on every request: `append_user_message {text}`, `replace_message {index, text}` (plain-text messages only), `truncate_tool_result {max_chars, tool_use_id?}`, `delete_message {indices}`. Index rules refer to the client's original history and are resolved before injections, so an injection never shifts them.
+- **Injection** is anchored at first use to the end of the history as it was, and re-inserted at that point on later turns (the client resends a history without it). After a user message it is merged into that message after any `tool_result` blocks; after an assistant message it becomes a new user message.
+- **Validator** (every apply, and at creation when a request is held): starts with a user message, no empty messages, every `tool_use` has its `tool_result` in the next message and vice versa, thinking/redacted_thinking blocks identical to the original. A rule can never edit or delete a message with thinking blocks. **An invalid result is never forwarded**: the whole overlay is skipped for that request, the original goes through, and the audit records why.
+- **Cache preview**: tokens from the first edited message onward are re-written to the prompt cache, so extra equiv. cost = tokens × (cache-write − cache-read rate), shown once before confirming (chars/4 estimate; savings from truncation/deletion are not netted).
+- **API** (mutations need the #62 token): `GET /api/sessions/:id/overlay` (rules + audit), `POST .../overlay/preview` (dry run against the held request, 409 if none), `POST .../overlay/rules` (400 if the dry run is invalid; accepted unvalidated when nothing is held), `DELETE .../overlay/rules/:ruleId`, `GET/POST /api/overlay[/passthrough]`. Events `overlay_changed`, `overlay_applied`.
+- **Audit** rows: `rule_added`, `rule_removed`, `applied` (with the effect), `skipped`, `rejected`, `passthrough_on/off`. Shown in the overlay panel on the context inspector page. **Pass-through** (UI toggle or `OPEN_TRACE_PASSTHROUGH=1`) disables all rules; the setting is in memory.
+- **UI** (`OverlayPanel`): inject guidance and trim tool results, preview (needs a held request), rule list with remove, audit trail. Replace and delete are API-only for now (they need a message picker).
+
 ### Later (not in this spec)
 Tool-level control (hold the response, edit or deny a `tool_use`; requires SSE rewriting), rewind / fork / what-if replay with git checkpoints, subagent call-stack grouping.
 
