@@ -10,6 +10,7 @@ import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
 import { createClaudeProxy, setRequestHook } from './proxy/claude-proxy.js';
 import { startDetectors } from './detectors.js';
+import { startRetention } from './retention.js';
 import { startDebugger } from './debugger.js';
 import { pipelineHook } from './hooks.js';
 import { startOpenCodeWatcher } from './watchers/opencode-watcher.js';
@@ -50,6 +51,9 @@ server.listen(config.daemonPort, '127.0.0.1', () => {
 setRequestHook(pipelineHook);
 startDebugger();
 createClaudeProxy(config.claudeProxyPort);
+
+// Delete data past RETENTION_DAYS (off by default)
+startRetention();
 
 // Stuck-agent detectors listen on the event bus
 startDetectors();

@@ -4,6 +4,7 @@ import { dirname } from 'path';
 import { config } from '../config.js';
 import { SCHEMA } from './schema.js';
 import { emit } from '../events.js';
+import { redact } from '../redact.js';
 
 let db;
 
@@ -93,6 +94,10 @@ export function insertPrompt(prompt) {
     raw_request: null, raw_response: null, model: null, input_text: null,
     first_token_ms: null, request_ms: null, context: null,
     ...prompt,
+    // Secrets never reach the database, whichever writer produced the row (#64).
+    input_text: redact(prompt.input_text ?? null),
+    raw_request: redact(prompt.raw_request ?? null),
+    raw_response: redact(prompt.raw_response ?? null),
   });
 }
 
@@ -102,7 +107,7 @@ export function insertToolCall(call) {
       (id, prompt_id, call_order, tool_use_id, call_type, name, input, output, duration_ms, timestamp)
     VALUES
       (@id, @prompt_id, @call_order, @tool_use_id, @call_type, @name, @input, @output, @duration_ms, @timestamp)
-  `).run({ duration_ms: null, input: null, output: null, tool_use_id: null, ...call });
+  `).run({ duration_ms: null, input: null, output: null, tool_use_id: null, ...call, input: redact(call.input ?? null), output: redact(call.output ?? null) });
 }
 
 /**
@@ -115,7 +120,7 @@ export function setToolCallOutput(toolUseId, output, arrivedAt = null, isError =
     SET output = @output, is_error = @isError,
         duration_ms = CASE WHEN @arrivedAt IS NULL THEN duration_ms ELSE MAX(0, @arrivedAt - timestamp) END
     WHERE tool_use_id = @toolUseId AND output IS NULL
-  `).run({ output, arrivedAt, toolUseId, isError: isError ? 1 : 0 });
+  `).run({ output: redact(output), arrivedAt, toolUseId, isError: isError ? 1 : 0 });
 }
 
 /** Store an alert once per (session, dedupe_key). Returns the row, or null if it already existed. */
@@ -179,7 +184,49 @@ export function insertOptimization(opt) {
       (id, prompt_id, original_prompt, optimized_prompt, improvement_notes, token_delta, webllm_model, created_at)
     VALUES
       (@id, @prompt_id, @original_prompt, @optimized_prompt, @improvement_notes, @token_delta, @webllm_model, @created_at)
-  `).run({ token_delta: null, webllm_model: null, ...opt });
+  `).run({ token_delta: null, webllm_model: null, ...opt, original_prompt: redact(opt.original_prompt ?? null), optimized_prompt: redact(opt.optimized_prompt ?? null) });
+}
+
+// ─── Privacy maintenance (#64) ────────────────────────────────────────────────
+
+/**
+ * Delete everything older than `cutoffMs`: prompts (with their tool calls and optimizations), then
+ * sessions left with no prompts (with their alerts and overlay rows). A session that still has a
+ * recent prompt is kept whole. Returns counts.
+ */
+export function pruneBefore(cutoffMs) {
+  const db = getDb();
+  return db.transaction(() => {
+    const old = '(SELECT id FROM prompts WHERE timestamp < ?)';
+    const toolCalls = db.prepare(`DELETE FROM tool_calls WHERE prompt_id IN ${old}`).run(cutoffMs).changes;
+    db.prepare(`DELETE FROM optimizations WHERE prompt_id IN ${old}`).run(cutoffMs);
+    const prompts = db.prepare('DELETE FROM prompts WHERE timestamp < ?').run(cutoffMs).changes;
+    const gone = '(SELECT id FROM sessions s WHERE s.started_at < ? AND NOT EXISTS (SELECT 1 FROM prompts p WHERE p.session_id = s.id))';
+    for (const table of ['alerts', 'overlay_rules', 'overlay_audit']) db.prepare(`DELETE FROM ${table} WHERE session_id IN ${gone}`).run(cutoffMs);
+    const sessions = db.prepare(`DELETE FROM sessions WHERE id IN ${gone}`).run(cutoffMs).changes;
+    return { prompts, toolCalls, sessions };
+  })();
+}
+
+/** Run the redactor over rows stored before redaction existed. Returns how many rows changed. */
+export function redactStoredRows() {
+  const db = getDb();
+  const targets = [
+    ['prompts', 'id', ['input_text', 'raw_request', 'raw_response']],
+    ['tool_calls', 'id', ['input', 'output']],
+    ['optimizations', 'id', ['original_prompt', 'optimized_prompt']],
+  ];
+  let changed = 0;
+  db.transaction(() => {
+    for (const [table, key, cols] of targets) {
+      const update = db.prepare(`UPDATE ${table} SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE ${key} = @key`);
+      for (const row of db.prepare(`SELECT ${key}, ${cols.join(', ')} FROM ${table}`).all()) { // .all(): a statement cannot run while a cursor is open
+        const next = Object.fromEntries(cols.map((c) => [c, redact(row[c])]));
+        if (cols.some((c) => next[c] !== row[c])) { update.run({ ...next, key: row[key] }); changed++; }
+      }
+    }
+  })();
+  return changed;
 }
 
 // ─── Read methods ─────────────────────────────────────────────────────────────

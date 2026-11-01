@@ -38,6 +38,7 @@ import { basename } from 'path';
 import { config } from '../config.js';
 import { upsertSession, insertPrompt, insertToolCall, getDb } from '../db/store.js';
 import { estimateCost } from '../pricing/models.js';
+import { retentionCutoff } from '../retention.js';
 
 // Minimum ms between sync runs (debounce rapid WAL writes)
 const DEBOUNCE_MS = 500;
@@ -124,6 +125,12 @@ function extractText(parts) {
  * @param {Database} ocDb       - readonly opencode DB handle
  */
 function processSession(ocSession, messages, ocDb) {
+  // Retention: do not re-import a session that was (or would be) pruned, or it would come back every sync.
+  const cutoff = retentionCutoff();
+  if (cutoff !== null) {
+    const last = Math.max(toMs(ocSession.time_created), ...messages.map((m) => toMs(m.time_created)));
+    if (last < cutoff) return;
+  }
   const sessionId   = 'oc-' + ocSession.id;
   const projectName = ocSession.title
     || (ocSession.directory ? basename(String(ocSession.directory)) : null)
