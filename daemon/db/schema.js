@@ -41,6 +41,7 @@ export const SCHEMA = `
     name        TEXT NOT NULL,
     input       TEXT,
     output      TEXT,
+    is_error    INTEGER,
     duration_ms INTEGER,
     timestamp   INTEGER NOT NULL
   );
@@ -54,6 +55,16 @@ export const SCHEMA = `
     token_delta       INTEGER,
     webllm_model      TEXT,
     created_at        INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS alerts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    kind       TEXT NOT NULL,
+    dedupe_key TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (session_id, dedupe_key)
   );
 
   CREATE INDEX IF NOT EXISTS idx_prompts_session   ON prompts(session_id);

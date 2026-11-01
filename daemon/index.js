@@ -9,6 +9,7 @@ import { guard, loadToken, DEV_ORIGINS } from './security.js';
 import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
 import { createClaudeProxy } from './proxy/claude-proxy.js';
+import { startDetectors } from './detectors.js';
 import { startOpenCodeWatcher } from './watchers/opencode-watcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,6 +46,9 @@ server.listen(config.daemonPort, '127.0.0.1', () => {
 
 // Start Claude Code intercepting proxy
 createClaudeProxy(config.claudeProxyPort);
+
+// Stuck-agent detectors listen on the event bus
+startDetectors();
 
 // Start OpenCode SQLite watcher
 const ocWatcher = startOpenCodeWatcher();
