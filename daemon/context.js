@@ -51,17 +51,18 @@ export function analyzeContext(reqBody) {
 
 /**
  * What changed between two consecutive requests of the same session.
- * History is append-only unless the client compacted it (fewer messages than before).
+ * History is append-only unless it was reset (fewer messages than before): a new conversation in the
+ * same session, or a compaction. The request data cannot tell those apart, so both are reported as `reset`.
  */
 export function diffContext(prev, cur) {
   if (!prev) return null;
   const delta = Object.fromEntries(Object.keys(cur.sections).map((k) => [k, cur.sections[k] - prev.sections[k]]));
-  const compacted = cur.message_count < prev.message_count;
-  const added = compacted ? cur.messages : cur.messages.slice(prev.message_count);
+  const reset = cur.message_count < prev.message_count;
+  const added = reset ? cur.messages : cur.messages.slice(prev.message_count);
   const biggest = added.filter((m) => m.k === 'tool_result').sort((a, b) => b.m - a.m)[0];
   return {
     delta,
-    compacted,
+    reset,
     added_messages: added.length,
     largest_tool_result: biggest ? { name: biggest.n ?? null, chars: biggest.m } : null,
   };

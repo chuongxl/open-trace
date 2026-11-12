@@ -146,6 +146,13 @@ test('global pass-through disables every rule and is audited', async () => {
   assert.equal((await api('/overlay/passthrough', 'POST', { enabled: false })).body.passthrough, false);
   await send(history(3));
   assert.notDeepEqual(last().messages, body.messages, 'rules apply again');
+  const actions = (await audit()).map(x => x.action);
+  assert.ok(actions.includes('passthrough_on') && actions.includes('passthrough_off'), 'global toggles show in the session audit');
+});
+
+test('global audit entries from before the session started are not shown in its audit', async () => {
+  store.getDb().prepare("INSERT INTO overlay_audit (session_id, action, detail, created_at) VALUES (NULL, 'passthrough_on', 'ancient', 1)").run();
+  assert.ok(!(await audit()).some(x => x.detail === 'ancient'));
 });
 
 test('removing a rule stops its effect; unknown sessions and bad rules are rejected', async () => {

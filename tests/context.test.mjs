@@ -43,11 +43,11 @@ test('diffContext reports growth, added messages and the largest new tool result
   assert.equal(d.delta.tool_results, 5000);
   assert.equal(d.delta.system, 0);
   assert.deepEqual(d.largest_tool_result, { name: 'Read', chars: 5000 });
-  assert.equal(d.compacted, false);
+  assert.equal(d.reset, false);
 });
 
-test('diffContext flags compaction when history shrinks, and has no diff for the first turn', () => {
+test('diffContext flags a reset (new conversation or compaction) when history shrinks, and has no diff for the first turn', () => {
   const d = diffContext(analyzeContext(turn2), analyzeContext(turn1));
-  assert.equal(d.compacted, true);
+  assert.equal(d.reset, true);
   assert.equal(diffContext(null, analyzeContext(turn1)), null);
 });

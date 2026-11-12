@@ -100,7 +100,14 @@ export default function SessionContext() {
                 <span>{new Date(t.timestamp).toLocaleTimeString()}</span>
                 <span title="estimated context size">~{formatTokenCount(estTokens(t.total_chars))} tokens in context</span>
                 <span>{t.message_count} messages</span>
-                {t.diff?.compacted && <span className="rounded bg-amber-900/50 px-1.5 text-amber-300">history compacted</span>}
+                {t.diff?.reset && (
+                  <span
+                    className="rounded bg-amber-900/50 px-1.5 text-amber-300"
+                    title="The history got shorter: a new conversation in this session, or a compaction. The request data cannot tell which."
+                  >
+                    history reset
+                  </span>
+                )}
                 <Link to={`/prompts/${encodeURIComponent(t.prompt_id)}`} className="ml-auto text-sky-400 hover:underline">
                   trace
                 </Link>
