@@ -25,6 +25,7 @@ import { estimateCost } from '../pricing/models.js';
 import { analyzeContext } from '../context.js';
 import { emit } from '../events.js';
 import { syntheticEndTurn } from './synthetic.js';
+import { isOpenAIRequest, handleOpenAI, setOpenAIUpstream } from './openai-proxy.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const SESSION_TIMEOUT_MS  = 30 * 60 * 1000; // 30-min inactivity window
@@ -465,6 +466,7 @@ function forwardStreaming(reqBody, rawBody, req, res, headers) {
  * All other requests are piped through to Anthropic unchanged.
  */
 function handleRequest(req, res) {
+  if (isOpenAIRequest(req)) return handleOpenAI(req, res); // Aider, Continue, Cline, Roo Code (#28)
   const isMessages = req.method === 'POST' && req.url.includes('/messages');
 
   if (!isMessages) {
@@ -550,6 +552,7 @@ function handleRequest(req, res) {
  */
 export function createClaudeProxy(port, opts = {}) {
   if (opts.upstream) upstream = opts.upstream;
+  if (opts.openaiUpstream) setOpenAIUpstream(opts.openaiUpstream);
   const server = http.createServer(handleRequest);
 
   server.on('error', err => {

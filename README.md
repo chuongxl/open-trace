@@ -49,6 +49,7 @@ Then open the dashboard in your browser at the dashboard port.
 |------|--------|-------|
 | Claude Code | HTTP proxy via `ANTHROPIC_BASE_URL` | Auto-added by `./setup.sh` |
 | OpenCode | SQLite file watcher | Automatic |
+| Aider, Continue.dev, Cline, Roo Code | OpenAI-compatible proxy on the same port | See [OpenAI-compatible clients](#openai-compatible-clients) |
 | GitHub Copilot | copilot-tracer watcher | See [#13](../../issues/13) |
 
 ## Cost Display
@@ -76,6 +77,21 @@ cd daemon && node --watch index.js
 # Dashboard (hot reload)
 cd dashboard && npm run dev
 ```
+
+## OpenAI-compatible clients
+
+Aider, Continue.dev, Cline and Roo Code talk the OpenAI chat-completions protocol. Point their base URL at the proxy (same port as Claude Code) and their usage, tool calls and tool results are recorded like any other session (token counts, equiv. cost, trace, context inspector, stuck-agent alerts):
+
+| Client | Setup |
+|---|---|
+| Aider | `export OPENAI_API_BASE=http://localhost:9876/v1` (`./setup.sh` adds this when `aider` is installed) |
+| Continue.dev | `apiBase: http://localhost:9876/v1` on the model in `~/.continue/config.yaml` |
+| Cline / Roo Code | provider "OpenAI Compatible", Base URL `http://localhost:9876/v1`, your own API key |
+
+- **Upstream:** requests go to `https://api.openai.com`. For another OpenAI-compatible provider set `OPENAI_UPSTREAM` for the daemon (include any path prefix, e.g. `https://openrouter.ai/api`).
+- **Project:** these clients do not send their working directory. Cline and Roo Code reveal it in their prompts and are grouped by project automatically. For Aider and Continue, put the directory in the base URL, e.g. as a shell function: `aider() { OPENAI_API_BASE="http://localhost:9876/_cwd/$(printf %s "$PWD" | base64 | tr -d '\n=' | tr '+/' '-_')/v1" command aider "$@"; }`. Without it, each conversation is its own session named after the client.
+- **Streaming usage:** the stream only reports tokens if asked, so for `api.openai.com` the proxy adds `stream_options.include_usage` to streaming requests (set `OPENAI_INJECT_USAGE=1` or `0` to force it on or off for other upstreams; clients already handle the extra usage chunk). Without usage, tokens are recorded as 0.
+- **Observe only:** pause, stop and the context overlay work for Claude Code only. Only `chat/completions` is recorded; `embeddings`, `completions` and `responses` are passed through unrecorded; `GET /v1/models` is not routed to OpenAI (it goes to the Anthropic upstream).
 
 ## Local API security
 

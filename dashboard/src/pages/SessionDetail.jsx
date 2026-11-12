@@ -1,3 +1,4 @@
+import { canControl, hasContext } from '../lib/tools.js'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getSession } from '../api/client.js'
@@ -42,13 +43,13 @@ export default function SessionDetail() {
         <h1 className="text-xl font-semibold">{session.project_name || 'Session'}</h1>
         <ToolBadge tool={session.tool} />
         <CostBadge cost={session.equiv_cost_usd ?? 0} />
-        {session.tool === 'claude-code' && (
+        {hasContext(session.tool) && (
           <Link to={`/sessions/${encodeURIComponent(id)}/context`} className="ml-auto text-sm text-sky-400 hover:underline">
             Context inspector
           </Link>
         )}
       </div>
-      {session.tool === 'claude-code' && <DebugControls sessionId={id} />}
+      {canControl(session.tool) && <DebugControls sessionId={id} />}
       <div className="mt-2 text-xs text-neutral-400">
         {session.model} · started {new Date(session.started_at).toLocaleString()} ·{' '}
         {formatTokenCount(session.total_input_tokens)} in / {formatTokenCount(session.total_output_tokens)} out
