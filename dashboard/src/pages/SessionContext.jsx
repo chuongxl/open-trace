@@ -1,3 +1,4 @@
+import { canControl } from '../lib/tools.js'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { TriangleAlert } from 'lucide-react'
@@ -59,8 +60,12 @@ export default function SessionContext() {
           {live ? 'live' : 'offline'}
         </span>
       </div>
-      <DebugControls sessionId={id} />
-      <OverlayPanel sessionId={id} />
+      {canControl(session.tool) && (
+        <>
+          <DebugControls sessionId={id} />
+          <OverlayPanel sessionId={id} />
+        </>
+      )}
       <p className="mt-3 text-xs text-neutral-400">
         What the model is sent on every request. Sizes are estimates (~chars/4), split by a heuristic: CLAUDE.md is detected from
         Claude Code’s injected reminder.

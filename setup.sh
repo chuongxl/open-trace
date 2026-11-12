@@ -31,12 +31,14 @@ case "$(basename "${SHELL:-}")" in zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashr
 BEGIN="# >>> open-trace >>>"; END="# <<< open-trace <<<"
 touch "$RC"
 sed -i.bak "/^$BEGIN\$/,/^$END\$/d" "$RC" && rm -f "$RC.bak"
-cat >> "$RC" <<BLOCK
-$BEGIN
-export ANTHROPIC_BASE_URL=http://localhost:$PROXY_PORT
-export API_TIMEOUT_MS=600000
-$END
-BLOCK
+{
+  echo "$BEGIN"
+  echo "export ANTHROPIC_BASE_URL=http://localhost:$PROXY_PORT"
+  echo "export API_TIMEOUT_MS=600000"
+  # OpenAI-compatible clients (#28): only when Aider is installed, since this routes every OpenAI SDK call in your shell through open-trace
+  if command -v aider >/dev/null 2>&1; then echo "export OPENAI_API_BASE=http://localhost:$PROXY_PORT/v1"; fi
+  echo "$END"
+} >> "$RC"
 ok "env block written to $RC"
 
 # 4. Auto-start service

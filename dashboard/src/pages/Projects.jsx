@@ -1,3 +1,4 @@
+import { TOOLS } from '../lib/tools.js'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getProjects } from '../api/client.js'
@@ -6,13 +7,8 @@ import CostBadge from '../components/CostBadge.jsx'
 import TokenBar from '../components/TokenBar.jsx'
 import { shortenHomePath, formatTokenCount } from '../lib/format.js'
 
-const FILTERS = ['all', 'claude-code', 'opencode', 'copilot']
-const FILTER_LABELS = {
-  all: 'All',
-  'claude-code': 'Claude Code',
-  opencode: 'OpenCode',
-  copilot: 'Copilot',
-}
+const FILTERS = ['all', ...Object.keys(TOOLS)]
+const FILTER_LABELS = { all: 'All', ...Object.fromEntries(Object.entries(TOOLS).map(([k, v]) => [k, v.label])) }
 
 export default function Projects() {
   const [projects, setProjects] = useState([])

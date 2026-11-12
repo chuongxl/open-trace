@@ -26,5 +26,10 @@ export const config = {
     contextWindowTokens: num('CONTEXT_WINDOW_TOKENS', 200000),
     costUsd:             num('DETECT_COST_USD', 5),          // session equiv. cost
   },
+  // Where OpenAI-compatible clients (Aider, Continue, Cline, Roo Code) are forwarded (#28). Include a path prefix
+  // for providers that need one (e.g. https://openrouter.ai/api). OPENAI_INJECT_USAGE=1|0 forces asking streaming
+  // responses to include token usage; by default that is done only for api.openai.com.
+  openaiUpstream: process.env.OPENAI_UPSTREAM ?? 'https://api.openai.com',
+  openaiInjectUsage: process.env.OPENAI_INJECT_USAGE,
   version:         '0.1.0',
 };
