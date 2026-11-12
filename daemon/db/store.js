@@ -169,8 +169,16 @@ export function addOverlayAudit({ session_id = null, request_id = null, rule_id 
     .run(session_id, request_id, rule_id, action, detail, Date.now());
 }
 
+/** A session's audit trail plus the global entries (pass-through toggles) made since the session started. */
 export function getOverlayAudit(sessionId, limit = 200) {
-  return getDb().prepare('SELECT * FROM (SELECT * FROM overlay_audit WHERE session_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC').all(sessionId, limit);
+  return getDb().prepare(`
+    SELECT * FROM (
+      SELECT a.* FROM overlay_audit a
+      WHERE a.session_id = @sessionId
+         OR (a.session_id IS NULL AND a.created_at >= COALESCE((SELECT started_at FROM sessions WHERE id = @sessionId), 0))
+      ORDER BY a.id DESC LIMIT @limit
+    ) ORDER BY id ASC
+  `).all({ sessionId, limit });
 }
 
 export function insertOptimization(opt) {
