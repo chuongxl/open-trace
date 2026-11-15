@@ -10,6 +10,7 @@ import apiRouter from './api/router.js';
 import { getDb } from './db/store.js';
 import { createClaudeProxy, setRequestHook } from './proxy/claude-proxy.js';
 import { startDetectors } from './detectors.js';
+import { handleTraces } from './otel/ingest.js';
 import { startDebugger } from './debugger.js';
 import { pipelineHook } from './hooks.js';
 import { startOpenCodeWatcher } from './watchers/opencode-watcher.js';
@@ -29,6 +30,10 @@ app.use('/api', guard({ token, extraOrigins }), cors({ origin: [...DEV_ORIGINS, 
 // The dashboard (same-origin or an allowed dev origin) fetches the token here; foreign pages are rejected by the guard.
 app.get('/api/token', (_req, res) => res.json({ token }));
 app.use('/api', apiRouter);
+
+// OTLP/HTTP JSON trace receiver (#25). Standard exporters post to <endpoint>/v1/traces, so it lives at the root,
+// behind the same guard as the API: send the install token as `Authorization: Bearer <token>`.
+app.post('/v1/traces', guard({ token, extraOrigins }), handleTraces);
 
 // Serve built dashboard if present (express.static is bundled with express)
 const dashDist = resolve(process.env.DASHBOARD_DIST ?? join(__dirname, '..', 'dashboard', 'dist'));
@@ -60,5 +65,11 @@ const ocWatcher = startOpenCodeWatcher();
 const shutdown = () => { server.close(); ocWatcher?.close(); process.exit(0); };
 process.on('SIGTERM', shutdown);
 process.on('SIGINT',  shutdown);
+
+// Malformed request bodies are the client's fault: answer 400 JSON, not an HTML stack trace.
+app.use((err, _req, res, next) => {
+  if (err?.type?.startsWith?.('entity.') || err instanceof SyntaxError) return res.status(400).json({ error: 'Invalid request body' });
+  next(err);
+});
 
 export default app;

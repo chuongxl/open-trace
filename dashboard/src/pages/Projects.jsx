@@ -6,12 +6,13 @@ import CostBadge from '../components/CostBadge.jsx'
 import TokenBar from '../components/TokenBar.jsx'
 import { shortenHomePath, formatTokenCount } from '../lib/format.js'
 
-const FILTERS = ['all', 'claude-code', 'opencode', 'copilot']
+const FILTERS = ['all', 'claude-code', 'opencode', 'copilot', 'otel']
 const FILTER_LABELS = {
   all: 'All',
   'claude-code': 'Claude Code',
   opencode: 'OpenCode',
   copilot: 'Copilot',
+  otel: 'OpenTelemetry',
 }
 
 export default function Projects() {

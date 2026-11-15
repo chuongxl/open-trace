@@ -1,0 +1,9 @@
+# OTLP trace ingest (#25)
+
+`POST /v1/traces` (root of the daemon port, because OTLP exporters append `/v1/traces` to their endpoint) behind the same guard as `/api` (loopback Host, allowed Origin, install bearer token). OTLP/HTTP JSON only: other content types get 415, bad JSON or a wrong shape gets 400 JSON (a final error middleware turns body-parser errors into 400), unexpected failures 500. Success is `{}` (everything accepted).
+
+- `daemon/otel/mapper.js` (pure): decodes AnyValue (int64 as strings), keeps GenAI chat spans (operation `chat`/`text_completion`/`generate_content`, or any span with `gen_ai.usage.*`) and tool spans (`execute_tool` or `gen_ai.tool.name`), counts the rest as skipped. Input tokens follow the GenAI convention (they include cached tokens), so `cache_read` / `cache_creation` are subtracted to match open-trace's fresh-input-plus-cache split.
+- `daemon/otel/ingest.js`: session `otel-<conversation id | session.id | traceId>`, tool `otel`, project from `process.working_directory` else `otel:<service.name>`. Prompt id `otel-<spanId>`, tool call id `otel-<spanId>`: idempotent (a retry changes nothing, session totals are only incremented for newly inserted prompts). One transaction per request. Tool spans attach to their parent chat span, else the latest chat of the trace, else the latest prompt of the session, else a placeholder prompt (children usually end, and are exported, before their parent). Emits `turn_finished` so live view and detectors work.
+- Store helpers: `promptExists`, `latestPromptBefore`, `nextCallOrder`, `setToolCallError`.
+- Out of scope: protobuf/gRPC, metrics/logs, non-GenAI spans, assistant output messages as tool calls, OpenInference attribute names.
+- Verified with the real OpenTelemetry JS exporter configured through the standard environment variables.

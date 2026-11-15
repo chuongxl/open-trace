@@ -173,6 +173,24 @@ export function getOverlayAudit(sessionId, limit = 200) {
   return getDb().prepare('SELECT * FROM (SELECT * FROM overlay_audit WHERE session_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC').all(sessionId, limit);
 }
 
+// ─── OTLP ingest helpers (#25) ────────────────────────────────────────────────
+
+export function promptExists(id) {
+  return getDb().prepare('SELECT 1 FROM prompts WHERE id = ?').get(id) !== undefined;
+}
+
+export function latestPromptBefore(sessionId, ts) {
+  return getDb().prepare('SELECT id FROM prompts WHERE session_id = ? AND timestamp <= ? ORDER BY timestamp DESC, rowid DESC LIMIT 1').get(sessionId, ts)?.id ?? null;
+}
+
+export function nextCallOrder(promptId) {
+  return getDb().prepare('SELECT COALESCE(MAX(call_order) + 1, 0) AS n FROM tool_calls WHERE prompt_id = ?').get(promptId).n;
+}
+
+export function setToolCallError(id) {
+  getDb().prepare('UPDATE tool_calls SET is_error = 1 WHERE id = ?').run(id);
+}
+
 export function insertOptimization(opt) {
   getDb().prepare(`
     INSERT OR REPLACE INTO optimizations
