@@ -49,6 +49,7 @@ Then open the dashboard in your browser at the dashboard port.
 |------|--------|-------|
 | Claude Code | HTTP proxy via `ANTHROPIC_BASE_URL` | Auto-added by `./setup.sh` |
 | OpenCode | SQLite file watcher | Automatic |
+| Any OpenTelemetry-instrumented agent | OTLP/HTTP JSON receiver | See [OpenTelemetry](#opentelemetry-otlp) |
 | GitHub Copilot | copilot-tracer watcher | See [#13](../../issues/13) |
 
 ## Cost Display
@@ -76,6 +77,28 @@ cd daemon && node --watch index.js
 # Dashboard (hot reload)
 cd dashboard && npm run dev
 ```
+
+## OpenTelemetry (OTLP)
+
+Any agent or app instrumented with the OpenTelemetry [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) can report to open-trace without a bespoke integration. The daemon accepts OTLP/HTTP **JSON** traces at `POST /v1/traces` on the dashboard port. Set the standard exporter variables (the token is the install token from `~/.open-trace/token`; a space in the header value is percent-encoded):
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:9900
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20$(cat ~/.open-trace/token)"
+# optional, to get prompt text instead of only token counts:
+export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+```
+
+| Span | Becomes |
+|---|---|
+| `gen_ai.operation.name` = `chat` / `text_completion` / `generate_content`, or any span with `gen_ai.usage.*` tokens | a prompt: model (`gen_ai.response.model`, else `gen_ai.request.model`), tokens (`gen_ai.usage.input_tokens` / `output_tokens`, older `prompt_tokens` / `completion_tokens`; cached tokens from `gen_ai.usage.cache_read.input_tokens` are split out of the input count), equiv. cost, duration, text from `gen_ai.input.messages` / `gen_ai.prompt` / a `gen_ai.user.message` event |
+| `execute_tool` (or a span with `gen_ai.tool.name`) | a tool call under its parent model call (else the latest one in the trace or session): name, `gen_ai.tool.call.id`, arguments, result, real duration, error status |
+| anything else | ignored |
+
+- **Session** = `gen_ai.conversation.id`, else `session.id`, else the trace. **Project** = `process.working_directory` if set, else the `service.name` resource attribute. They show up as "OpenTelemetry" in the dashboard.
+- Re-sent spans are ignored, so exporter retries do not double count. Model calls without prompt text are grouped into one turn per session (turn grouping); turn on message-content capture for one row per prompt.
+- Not supported: protobuf and gRPC (`415`; use `http/json`), metrics and logs, and non-GenAI spans. Observe only (no pause/overlay). Malformed payloads get `400`; a missing or wrong token gets `401` like the rest of the API.
 
 ## Local API security
 

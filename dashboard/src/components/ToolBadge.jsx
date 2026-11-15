@@ -2,6 +2,7 @@ const TOOLS = {
   'claude-code': { label: 'Claude Code', className: 'bg-orange-900/60 text-orange-300' },
   opencode: { label: 'OpenCode', className: 'bg-sky-900/60 text-sky-300' },
   copilot: { label: 'Copilot', className: 'bg-purple-900/60 text-purple-300' },
+  otel: { label: 'OpenTelemetry', className: 'bg-indigo-900/60 text-indigo-300' },
 }
 
 export default function ToolBadge({ tool }) {
